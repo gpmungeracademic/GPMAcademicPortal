@@ -3,9 +3,23 @@
 <head>
 <meta charset="UTF-8">
 <!--
-  GPM ACADEMIC PORTAL — Frontend v12.84
+  GPM ACADEMIC PORTAL — Frontend v12.85
   Build: 2026-11-02
-  Version: v12.84
+  Version: v12.85
+  Changes (v12.85): FIX — student dashboard Internal Total was wrong
+           The student Marks tab showed Theory Internal Total as a raw sum of ALL
+           columns (CT1+CT2+CT3+CT4+Attendance+Assignment = 48/90) instead of the
+           correct formula. Now renderSection() uses per-section formulas matching
+           the faculty marks-entry display:
+             Theory:    avg of top 2 CT + Attendance + Assignment (out of 30)
+                        (CT marks sorted descending, top 2 averaged, missing CTs = 0)
+             Practical: PRA + PDA + Viva-Voce only (Attendance displayed but NOT
+                        in the total — out of lab internal max)
+             Term Work: Assignment + Seminar + Micro Project (out of TW internal max)
+           Grand Total = Internal Total + External (out of 100 for Theory, 50 for
+           Practical/Term Work). A footnote under the Theory table explains the
+           formula. The GS getStudentMarks() also got the v12.84 dedup fix so the
+           student dashboard no longer reads stale duplicate matrix keys.
   Changes (v12.84): ROOT CAUSE FIX + ZERO-WEIGHT FILTERING
            1) ROOT CAUSE: When faculty changed a component's max marks, enterMarks()
               created a NEW matrix key (e.g. "Seminar (10)") alongside the stale
@@ -10769,6 +10783,11 @@ async function loadStudentMarks() {
   });
 
   // Helper: render a single section table
+  // v12.85: Internal Total now uses the CORRECT per-section formula (matching
+  // the faculty marks-entry display), NOT a raw sum of all columns:
+  //   Theory:    avg of top 2 CT + Attendance + Assignment (out of 30)
+  //   Practical: PRA + PDA + Viva-Voce (NOT Attendance — out of lab internal max)
+  //   Term Work: Assignment + Seminar + Micro Project (out of TW internal max)
   function renderSection(title, sectionKey, internalCols) {
     var courses = Object.values(grouped[sectionKey] || {});
     if (courses.length === 0) return '';  // no marks in this section → don't show
@@ -10783,19 +10802,56 @@ async function loadStudentMarks() {
     html += '</tr></thead><tbody>';
     courses.forEach(function(course) {
       html += '<tr><td><strong>' + escapeHtml(course.courseCode) + '</strong><br><span style="font-size:10px;color:var(--gray-600)">' + escapeHtml(course.courseName||'') + '</span></td>';
-      var internalSum = 0, internalMax = 0;
+      // Render individual component columns (display only — the Internal Total
+      // is computed separately below using the section-specific formula)
       internalCols.forEach(function(col) {
-        // For Theory "Attendance", also check "Attendance" (theory) not "Attendance (Prac)"
         var comp = course.components[col];
         if (!comp && col === 'Attendance') comp = course.components['Attendance'];
         if (comp) {
-          internalSum += comp.obtained;
-          internalMax += comp.max;
           html += '<td style="text-align:center"><strong>' + comp.obtained + '</strong>/' + comp.max + '</td>';
         } else {
           html += '<td style="text-align:center;color:var(--gray-400)">—</td>';
         }
       });
+      // v12.85: Compute Internal Total using the section-specific formula
+      var internalSum = 0, internalMax = 0;
+      if (sectionKey === 'Theory') {
+        // Average of top 2 CT marks (missing CTs count as 0) + Attendance + Assignment
+        var ctVals = [];
+        var ctMaxVal = 20;
+        ['CT1', 'CT2', 'CT3', 'CT4'].forEach(function(ct) {
+          if (course.components[ct]) {
+            ctVals.push(course.components[ct].obtained);
+            ctMaxVal = course.components[ct].max;  // all CTs share the same max
+          } else {
+            ctVals.push(0);
+          }
+        });
+        ctVals.sort(function(a,b){return b-a;});
+        var top2Avg = (ctVals[0] + ctVals[1]) / 2;
+        var att = course.components['Attendance'] ? course.components['Attendance'].obtained : 0;
+        var attMax = course.components['Attendance'] ? course.components['Attendance'].max : 0;
+        var assign = course.components['Assignment'] ? course.components['Assignment'].obtained : 0;
+        var assignMax = course.components['Assignment'] ? course.components['Assignment'].max : 0;
+        internalSum = Math.round((top2Avg + att + assign) * 100) / 100;
+        internalMax = ctMaxVal + attMax + assignMax;  // typically 20 + 5 + 5 = 30
+      } else if (sectionKey === 'Practical') {
+        // PRA + PDA + Viva-Voce only (Attendance is displayed but NOT in the total)
+        ['PRA', 'PDA', 'Viva-Voce'].forEach(function(c) {
+          if (course.components[c]) {
+            internalSum += course.components[c].obtained;
+            internalMax += course.components[c].max;
+          }
+        });
+      } else if (sectionKey === 'Term Work') {
+        // Assignment + Seminar + Micro Project
+        ['Assignment', 'Seminar', 'Micro Project'].forEach(function(c) {
+          if (course.components[c]) {
+            internalSum += course.components[c].obtained;
+            internalMax += course.components[c].max;
+          }
+        });
+      }
       // Internal total
       html += '<td style="text-align:center;font-weight:700">' + internalSum + (internalMax > 0 ? '/' + internalMax : '') + '</td>';
       // External (End Sem)
@@ -10806,12 +10862,19 @@ async function loadStudentMarks() {
         html += '<td style="text-align:center;color:var(--gray-400)">—</td>';
       }
       // Total = internal + external
-      var totalObt = internalSum + (ext ? ext.obtained : 0);
+      var totalObt = Math.round((internalSum + (ext ? ext.obtained : 0)) * 100) / 100;
       var totalMax = internalMax + (ext ? ext.max : 0);
       html += '<td style="text-align:center;font-weight:700;color:var(--navy)">' + totalObt + (totalMax > 0 ? '/' + totalMax : '') + '</td>';
       html += '</tr>';
     });
-    html += '</tbody></table></div></div>';
+    html += '</tbody></table></div>';
+    // v12.85: Add a footnote for Theory explaining the Internal Total formula
+    if (sectionKey === 'Theory') {
+      html += '<div style="font-size:10px;color:var(--gray-600);margin-top:4px;padding:0 4px">' +
+        '<em>Internal Total = average of top 2 CT marks (out of 20) + Attendance (5) + Assignment (5) = out of 30. ' +
+        'Total = Internal + External (out of 100).</em></div>';
+    }
+    html += '</div>';
     return html;
   }
 
