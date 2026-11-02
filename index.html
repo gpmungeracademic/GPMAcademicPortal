@@ -3,10 +3,100 @@
 <head>
 <meta charset="UTF-8">
 <!--
-  GPM ACADEMIC PORTAL — Frontend v12.10
-  Build: 2026-10-26
-  Version: v12.10
-  Changes (v12.10): MARKS ENTRY REDESIGN + CONSOLIDATED FOIL DOWNLOAD
+  GPM ACADEMIC PORTAL — Frontend v12.84
+  Build: 2026-11-02
+  Version: v12.84
+  Changes (v12.84): ROOT CAUSE FIX + ZERO-WEIGHT FILTERING
+           1) ROOT CAUSE: When faculty changed a component's max marks, enterMarks()
+              created a NEW matrix key (e.g. "Seminar (10)") alongside the stale
+              "Seminar (5)" — the key includes the max, so the old entry wasn't
+              found and a duplicate was left behind. The foil then read the wrong
+              max. Fixed in GS: enterMarks() migrates stale keys' marks to the new
+              key and deletes them; getMarksFoilData() deduplicates on read by
+              keeping only the highest-max entry per base component name.
+           2) ZERO-WEIGHT FILTERING: Components with max=0 (missing) are excluded
+              from the marks foil, CO Attainment, and Final CO Attainment. The GS
+              adds presence flags (hasPRA, hasPDA, hasViva, hasTwAssign, hasSeminar,
+              hasMicroProj) and recalculates weights from only active components.
+              HTML changes:
+              - PRA/PDA/Viva individual pages: only render if the component exists
+              - Practical Master sheet: columns built dynamically (skip absent)
+              - TW Assignment/Seminar/MicroProject pages: only render if exists
+              - TW Master sheet: columns built dynamically (skip absent)
+              - CO Attainment from Practical/Term Work: columns built dynamically
+              Final CO Attainment tables need no change (they show aggregated
+              Internal/External, not per-component columns).
+  Changes (v12.83): FIX — per-CO attainment now uses component-specific marks
+           The v12.82 ratio-based weights cancelled out in the per-CO level
+           formula (because weight = componentMax/labInternalMax), so PRA/PDA/
+           Viva showed near-identical attainment values. Fixed by basing each
+           component's per-CO attainment on its OWN obtained marks:
+             level = (componentObtained + offset) / componentMax * 3
+           Now PRA/PDA/Viva (and TW Assign/Seminar/MicroProject) show DISTINCT
+           values reflecting actual marks. The ratio-based weights are still
+           applied in the Final Internal CO Attainment combination. No frontend
+           rendering changes needed — the tables already read praAvg/pdaAvg/
+           vivaAvg/praWeight/etc. from the foil data.
+  Changes (v12.82): PRACTICAL & TERM WORK CO ATTAINMENT — RATIO-BASED WEIGHTS
+           1) Practical CO attainment weights no longer fixed at 40%/40%/20%.
+              PRA wt = maxPRA/labInternalMax, PDA wt = maxPDA/labInternalMax,
+              Viva wt = maxViva/labInternalMax (labInternalMax default = 20).
+              Final Internal CO Attainment = PRA×wt + PDA×wt + Viva×wt.
+           2) Term Work CO attainment now per-CO per-component (was flat average).
+              Assign(TW)/Seminar/MicroProject each get per-CO attainment with ±2
+              variation; weights are ratio-based (max/twInternalMax, default 20).
+              Final Internal = Assign(TW)×wt + Seminar×wt + MicroProj×wt.
+           3) Practical Master header shows actual ratio-based weight %.
+           4) Final CO Attainment — Practical & Term Work pages now show the
+              footnotes "* Direct = 30% Internal + 70% External" and
+              "** Final = 80% Direct + 20% Indirect", matching Theory.
+  Changes (v12.81): BUG FIX
+           1) FIXED: "Cannot access 'coCount' before initialization" error when
+              generating marks foil. The fix is in the GS backend (coCount
+              declaration moved before the student loop). No frontend changes
+              were needed — the frontend already correctly reads foil.coCount.
+  Changes (v12.80): FIVE BUG FIXES
+           1) MARKS FOIL RESTRUCTURED into 3 sequential parts in one PDF:
+              Part 1 (Theory): CT1-4, Assignment, Attendance, Class Test Avg,
+                External, Total — header shows "CourseName Theory" / "T<CourseCode>"
+              Part 2 (Practical): PRA, PDA, Viva-Voce, Practical Master —
+                header shows "CourseName Practical" / "P<CourseCode>"
+              Part 3 (Term Work): TW Assignment, Seminar, Micro Project, TW Master —
+                header shows "CourseName Term work" / "S<CourseCode>"
+              Summary: CO Attainment, PO-PSO (base course name/code)
+              Previously the summary pages (Class Test Avg, External, Total) were
+              placed AFTER the Practical/Term Work sections, breaking the Theory
+              grouping. Now all Theory pages are together, then Practical, then
+              Term Work, then Summary — all in one PDF.
+           2) FACULTY MARKS ENTRY TAB — the "Previously Generated Marks Foils"
+              panel is now the PRIMARY content. The marks entry form is collapsed
+              by default and can be toggled with the "Enter New Marks" button.
+           3) DRIVE SHARING FIX — marks foil PDF uploads now pass shareWith
+              (faculty email) so the faculty can access the file. Also added
+              HOD fallback for facultyId. GS-side defense-in-depth: if shareWith
+              is empty but facultyId is present, looks up faculty email from
+              the Faculty sheet.
+           4) STUDENT FEEDBACK TABS MERGED — the separate "CO Feedback" tab is
+              removed. Both CO Feedback and Teaching & Learning Feedback are now
+              in a single "Feedback" tab with two sections (mirroring the faculty
+              layout).
+           5) FEEDBACK LOOP BUG FIXED —
+              a) ROOT CAUSE: getStudentFeedbackStatus() in the GS was using the
+                 OLD legacy schema (checking fb.studentRoll as a column), but
+                 that column was removed in v12.17 when the schema was
+                 restructured to use a feedbackMatrix JSON cell. So it ALWAYS
+                 returned empty → tlSubmitted was always false → "Give Feedback"
+                 kept showing after submission → marks stayed locked forever.
+              b) FIX: Rewrote getStudentFeedbackStatus() to parse the
+                 feedbackMatrix JSON (same approach as getStudentCoFeedbackStatus).
+                 Now tlSubmitted is correctly detected.
+              c) ONE-TIME submission only — no Edit button. Students submit
+                 feedback once per course; duplicates are rejected.
+              d) Marks gating (lockedCourses in getStudentMarks) now works
+                 correctly — after both CO + TL feedback are submitted,
+                 hasStudentSubmittedBothFeedbacks() returns true and marks
+                 become visible.
+  v12.10: MARKS ENTRY REDESIGN + CONSOLIDATED FOIL DOWNLOAD
            1) MARKS ENTRY — replaced the single "Component Type" dropdown
               with a 3-level cascade: Section → Part → Component. Six modes:
                 • Theory · Internal → CT1/CT2/CT3/CT4/Assignment/Quiz + COs (multi)
@@ -1520,7 +1610,6 @@ input[type=number] {
         <button class="tab-btn" data-tab="student-tab-attendance">Attendance</button>
         <button class="tab-btn" data-tab="student-tab-marks">Marks</button>
         <button class="tab-btn" data-tab="student-tab-feedback">Feedback</button>
-        <button class="tab-btn" data-tab="student-tab-cofeedback">CO Feedback</button>
         <button class="tab-btn" data-tab="student-tab-notices">Notices</button>
       </div>
 
@@ -1564,36 +1653,35 @@ input[type=number] {
       </div>
 
       <div id="student-tab-feedback" class="hidden">
-        <div class="section-heading">
-          Course Feedback
+        <div class="alert alert-info" style="margin-top:8px;font-size:12px">
+          <strong>Feedback</strong> — Submit both <strong>Course Outcome (CO) Feedback</strong>
+          and <strong>Teaching &amp; Learning Feedback</strong> for each course to unlock your
+          internal marks. The feedback window opens automatically when the faculty enters CT4 marks.
+          Your feedback is anonymous — faculty and admins see only aggregated averages.
+          You may edit your feedback after submission if needed.
+        </div>
+
+        <!-- Section 1: CO Feedback -->
+        <div class="section-heading" style="margin-top:18px">Course Outcome (CO) Feedback</div>
+        <div class="alert alert-info" style="font-size:12px">
+          Rate each Course Outcome (CO) on a scale of 1-3 (1 = Low, 2 = Medium,
+          3 = High). Each statement is prefixed with "I am able to…" to confirm
+          your achievement of the outcome.
+        </div>
+        <div id="student-cofeedback-list"></div>
+        <div id="student-cofeedback-form-container"></div>
+
+        <!-- Section 2: Teaching & Learning Feedback -->
+        <div class="section-heading" style="margin-top:24px">
+          Teaching &amp; Learning Feedback
           <span class="fb-window-status" id="student-fb-window-status">Loading…</span>
         </div>
-        <div class="alert alert-info" style="margin-top:8px">
-          Your feedback is anonymous — faculty and admins see only the aggregated
-          averages, never your individual responses. Please rate each course
-          honestly on the 8 dimensions below (1 = poor, 5 = excellent).
-          <br><br>
-          <strong>v12.54:</strong> The feedback window for each course opens automatically
-          when the faculty enters CT4 marks. Until then, the feedback button shows
-          "Awaiting CT4 Marks". Once you submit feedback, your internal marks for that
-          course will become visible in the Marks tab.
+        <div class="alert alert-info" style="font-size:12px">
+          Rate each course on the 8 dimensions below (1 = poor, 5 = excellent).
+          All 8 questions are mandatory.
         </div>
         <div id="student-feedback-list"></div>
         <div id="student-feedback-form-container"></div>
-      </div>
-
-      <div id="student-tab-cofeedback" class="hidden">
-        <div class="section-heading">Course Outcome (CO) Feedback</div>
-        <div class="alert alert-info">
-          Rate each Course Outcome (CO) on a scale of 1-3 (1 = Low, 2 = Medium,
-          3 = High). Each statement is prefixed with "I am able to…" to confirm
-          your achievement of the outcome. Feedback is submitted online through
-          this form only — there is no physical form to download. CO feedback
-          can be submitted once per course.
-        </div>
-        <button class="btn btn-primary btn-sm" onclick="loadStudentCoFeedbackTab()">↻ Load My Courses</button>
-        <div id="student-cofeedback-list"></div>
-        <div id="student-cofeedback-form-container"></div>
       </div>
 
       <div id="student-tab-notices" class="hidden">
@@ -2114,6 +2202,31 @@ input[type=number] {
       </div>
 
       <div id="faculty-tab-marks" class="hidden">
+        <!-- v12.80: The "Previously Generated Marks Foils" panel is now the
+             PRIMARY content of this tab. The marks entry form is collapsed
+             by default and can be toggled with the "Enter New Marks" button. -->
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+          <div class="section-heading" style="margin-bottom:0">Marks Foils</div>
+          <button class="btn btn-primary btn-sm" id="fac-marks-toggle-form-btn" onclick="toggleFacultyMarksEntryForm()">📝 Enter New Marks</button>
+        </div>
+
+        <!-- v12.14: "Previously Generated Foils" panel — lists all .pdf files
+             saved in the faculty's Drive folder. This is the main content. -->
+        <div style="margin-top:6px;padding:12px;border:1px solid var(--gray-300);border-left:4px solid var(--gold);border-radius:6px;background:var(--white)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+            <div style="font-weight:600;color:var(--gray-800);font-size:14px">
+              📂 Previously Generated Marks Foils
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="loadFacultyGeneratedFoils()">↻ Refresh list</button>
+          </div>
+          <div id="faculty-generated-foils-list" style="font-size:13px">
+            <div style="color:var(--gray-400);padding:6px 0">Click "Refresh list" to load.</div>
+          </div>
+        </div>
+
+        <!-- v12.80: Marks entry form — collapsed by default. Toggle with the
+             "Enter New Marks" button above. -->
+        <div id="faculty-marks-entry-form" class="hidden" style="margin-top:18px;padding:14px;border:1px solid var(--gray-200);border-radius:6px;background:var(--gray-50)">
         <div class="section-heading">Enter Marks</div>
         <div class="alert alert-info" style="margin-top:8px;font-size:12px">
           <strong>v12.10 — Section + Part + Component flow.</strong> Each course has 3 sections
@@ -2135,7 +2248,6 @@ input[type=number] {
             <select id="fac-marks-course"><option value="">— Select —</option></select>
           </div>
 
-          <!-- v12.10: 3-level cascade — Section → Part → Component -->
           <div class="field">
             <label>Section <span class="req">*</span></label>
             <select id="fac-marks-section" onchange="onMarksSectionChange()">
@@ -2155,54 +2267,8 @@ input[type=number] {
             </select>
           </div>
 
-          <div class="field" id="fac-marks-component-field">
-            <label>Component <span class="req">*</span></label>
-            <select id="fac-marks-component-type" onchange="onMarksComponentChange()">
-              <option value="">— Select Section &amp; Part first —</option>
-            </select>
-          </div>
-
-          <div class="field" id="fac-marks-component-number-field" style="display:none">
-            <label>Practical / TW No. <span class="req">*</span></label>
-            <select id="fac-marks-component-number" onchange="onMarksComponentNumberChange()">
-              <option value="">— Select —</option>
-              <!-- populated dynamically by onMarksPartChange -->
-            </select>
-          </div>
-
-          <div class="field">
-            <label>Max Marks</label>
-            <input type="number" id="fac-marks-max" value="20" min="1">
-          </div>
-
-          <!-- v12.10: CO multi-select — shown only for Internal modes -->
-          <div class="field" id="fac-marks-co-field" style="display:none">
-            <label>COs Covered (multiple) <span class="req">*</span></label>
-            <div id="fac-marks-co-checkboxes" style="max-height:120px;overflow-y:auto;border:1px solid var(--gray-300);padding:8px;border-radius:4px;background:var(--white)">
-              <div style="color:var(--gray-400);font-size:12px">Pick Section · Internal to load COs.</div>
-            </div>
-          </div>
-
-          <!-- v12.13: "Generate & Save Marks Foil" button is ONLY in the
-               actions row below the marks entry table — not duplicated
-               in the top filters bar (it was confusing to have it twice). -->
+          <!-- v12.80: Removed CO picker — COs are defined in Course Outcomes tab -->
           <button class="btn btn-primary btn-sm" onclick="loadFacultyMarksEntry()">↻ Load Students</button>
-        </div>
-
-        <!-- v12.14: "Previously Generated Foils" panel — lists all .pdf files
-             saved in the faculty's Drive folder. Lets faculty re-download
-             any previously generated foil without re-entering marks or
-             regenerating. Auto-loaded when the Marks tab is activated. -->
-        <div style="margin-top:14px;padding:12px;border:1px solid var(--gray-300);border-left:4px solid var(--gold);border-radius:6px;background:var(--white)">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
-            <div style="font-weight:600;color:var(--gray-800);font-size:14px">
-              📂 Previously Generated Marks Foils
-            </div>
-            <button class="btn btn-secondary btn-sm" onclick="loadFacultyGeneratedFoils()">↻ Refresh list</button>
-          </div>
-          <div id="faculty-generated-foils-list" style="font-size:13px">
-            <div style="color:var(--gray-400);padding:6px 0">Click "Refresh list" to load.</div>
-          </div>
         </div>
 
         <div id="faculty-marks-sheet"></div>
@@ -2232,6 +2298,7 @@ input[type=number] {
           <div id="foil-result-errors" class="hidden"
                style="margin-top:10px;padding:8px;border-radius:4px;background:#fff4e5;color:#7a5b00;font-size:12px"></div>
         </div>
+        </div><!-- end faculty-marks-entry-form -->
       </div>
 
       <!-- v12.6: Faculty Timetable tab — same grid format as admin -->
@@ -3155,7 +3222,10 @@ async function generateFoilPDF(foil) {
   const cosArray = foil.cosArray || [];
 
   // Helper: draw header on each page — logo + institute name centered as a block
-  function drawHeader(title) {
+  // v12.80: sectionType ('Theory'|'Practical'|'Term Work') controls the
+  // subject name/code shown. Theory → "T" prefix, Practical → "P" prefix,
+  // Term Work → "S" prefix. Undefined (summary pages) uses base name/code.
+  function drawHeader(title, sectionType) {
     let y = margin;
     // Calculate center positions for logo + text block
     var logoSize = 45;
@@ -3183,8 +3253,21 @@ async function generateFoilPDF(foil) {
     doc.text('Batch: ' + batch, pageW - margin, y, { align: 'right' });
     y += 11;
     // Row 3: Subject Name (left) + Subject Code (right)
-    doc.text('Subject Name: ' + courseName, margin, y);
-    doc.text('Subject Code: ' + courseCode, pageW - margin, y, { align: 'right' });
+    // v12.80: section-specific name/code
+    var displayName = courseName;
+    var displayCode = courseCode;
+    if (sectionType === 'Theory') {
+      displayName = courseName + ' Theory';
+      displayCode = 'T' + courseCode;
+    } else if (sectionType === 'Practical') {
+      displayName = courseName + ' Practical';
+      displayCode = 'P' + courseCode;
+    } else if (sectionType === 'Term Work') {
+      displayName = courseName + ' Term work';
+      displayCode = 'S' + courseCode;
+    }
+    doc.text('Subject Name: ' + displayName, margin, y);
+    doc.text('Subject Code: ' + displayCode, pageW - margin, y, { align: 'right' });
     y += 14;
     return y;
   }
@@ -3198,10 +3281,21 @@ async function generateFoilPDF(foil) {
     return 1;
   }
 
+  // ════════════════════════════════════════════════════════════════════════
+  // v12.80: FOIL RESTRUCTURED INTO 3 SEQUENTIAL PARTS + SUMMARY
+  //   PART 1: THEORY   — CT1-4, Assignment, Attendance, Class Test Avg, External, Total
+  //   PART 2: PRACTICAL — PRA, PDA, Viva-Voce, Practical Master
+  //   PART 3: TERM WORK — TW Assignment, Seminar, Micro Project, TW Master
+  //   SUMMARY — Internal CO Attainment, Final CO Attainment, PO-PSO
+  // Each part uses section-specific Subject Name/Code in the header:
+  //   Theory → "T" prefix,  Practical → "P" prefix,  Term Work → "S" prefix
+  // ════════════════════════════════════════════════════════════════════════
+
+  // ── PART 1: THEORY SECTION ──────────────────────────────────────────────
   // PAGE 1: CT1
   if (students.length > 0) {
     doc.addPage();
-    var y = drawHeader('Class Test: I');
+    var y = drawHeader('Class Test: I', 'Theory');
     var head = [['SNo', 'Roll No.', 'Student Name', 'Marks Obtained (out of 20)', 'CO1 Attainment Level']];
     var body = students.map(function(s, i) {
       return [String(i+1), String(s.roll||''), String(s.name||''), String(s.ct1||0), String(s.ct1Level||attLevel(s.ct1||0, 20))];
@@ -3217,7 +3311,7 @@ async function generateFoilPDF(foil) {
   // PAGE 2: CT2
   if (students.length > 0) {
     doc.addPage();
-    y = drawHeader('Class Test: II');
+    y = drawHeader('Class Test: II', 'Theory');
     head = [['SNo', 'Roll No.', 'Student Name', 'Marks Obtained (out of 20)', 'CO2 Attainment Level']];
     body = students.map(function(s, i) {
       return [String(i+1), String(s.roll||''), String(s.name||''), String(s.ct2||0), String(s.ct2Level||attLevel(s.ct2||0, 20))];
@@ -3232,7 +3326,7 @@ async function generateFoilPDF(foil) {
   // PAGE 3: Learner Classification
   if (students.length > 0) {
     doc.addPage();
-    y = drawHeader('Learner Classification (Based on CT1 & CT2)');
+    y = drawHeader('Learner Classification (Based on CT1 & CT2)', 'Theory');
     head = [['SNo', 'Roll No.', 'Student Name', 'CT 1', 'CT 2', 'Average (CT1 & CT2)', 'Classification']];
     body = students.map(function(s, i) {
       var avg = ((s.ct1||0) + (s.ct2||0)) / 2;
@@ -3251,7 +3345,7 @@ async function generateFoilPDF(foil) {
   // PAGE 4: CT3
   if (students.length > 0) {
     doc.addPage();
-    y = drawHeader('Class Test: III');
+    y = drawHeader('Class Test: III', 'Theory');
     head = [['SNo', 'Roll No.', 'Student Name', 'Marks Obtained (out of 20)', 'CO3 Attainment Level']];
     body = students.map(function(s, i) {
       return [String(i+1), String(s.roll||''), String(s.name||''), String(s.ct3||0), String(s.ct3Level||attLevel(s.ct3||0, 20))];
@@ -3266,7 +3360,7 @@ async function generateFoilPDF(foil) {
   // PAGE 5: CT4
   if (students.length > 0) {
     doc.addPage();
-    y = drawHeader('Class Test: IV');
+    y = drawHeader('Class Test: IV', 'Theory');
     head = [['SNo', 'Roll No.', 'Student Name', 'Marks Obtained (out of 20)', 'CO4 Attainment Level', 'CO5 Attainment Level']];
     body = students.map(function(s, i) {
       return [String(i+1), String(s.roll||''), String(s.name||''), String(s.ct4||0), String(s.ct4Level||attLevel(s.ct4||0, 20)), String(s.ct4Level||attLevel(s.ct4||0, 20))];
@@ -3281,7 +3375,7 @@ async function generateFoilPDF(foil) {
   // PAGE 6: Assignment Marks
   if (students.length > 0) {
     doc.addPage();
-    y = drawHeader('Assignment Marks');
+    y = drawHeader('Assignment Marks', 'Theory');
     head = [['SNo', 'Roll No.', 'Student Name', 'Asg 1', 'Asg 2', 'Asg 3', 'Asg 4', 'Avg (out of 5)', 'Attainment Level']];
     body = students.map(function(s, i) {
       return [String(i+1), String(s.roll||''), String(s.name||''),
@@ -3298,7 +3392,7 @@ async function generateFoilPDF(foil) {
   // PAGE 7: Attendance Marks
   if (students.length > 0) {
     doc.addPage();
-    y = drawHeader('Attendance Marks');
+    y = drawHeader('Attendance Marks', 'Theory');
     head = [['SNo', 'Roll No.', 'Student Name', 'Classes Held', 'Classes Attended', '% Attendance', 'Marks (out of 5)', 'Attainment Level']];
     body = students.map(function(s, i) {
       return [String(i+1), String(s.roll||''), String(s.name||''),
@@ -3313,11 +3407,12 @@ async function generateFoilPDF(foil) {
     doc.text('Average Attainment Level: ' + attAvgLevel, margin, doc.lastAutoTable.finalY + 14);
   }
 
-  // PAGE 8: Class Test Average
+  // v12.80: PAGE 8 — Class Test Average (MOVED HERE from after Term Work —
+  // belongs with the Theory section, not in between sections)
   if (students.length > 0) {
     doc.addPage();
-    y = drawHeader('Class Test Average (All I-IV)');
-    head = [['SNo', 'Roll No.', 'Student Name', 'CT 1', 'CT 2', 'CT 3', 'CT 4', 'CT Average (out of 20)']];
+    y = drawHeader('Class Test Average (All I-IV)', 'Theory');
+    head = [['SNo', 'Roll No.', 'Student Name', 'CT 1', 'CT 2', 'CT 3', 'CT 4', 'Average of top two CT']];
     body = students.map(function(s, i) {
       return [String(i+1), String(s.roll||''), String(s.name||''),
         String(s.ct1||0), String(s.ct2||0), String(s.ct3||0), String(s.ct4||0), String(s.ctAvg||0)];
@@ -3326,10 +3421,10 @@ async function generateFoilPDF(foil) {
       styles: {font:'helvetica', fontSize:7, cellPadding:2}, headStyles: {fillColor:[26,58,92], textColor:255, fontSize:7} });
   }
 
-  // PAGE 9: External CO Attainment
+  // v12.80: PAGE 9 — External CO Attainment (MOVED HERE — Theory section)
   if (students.length > 0) {
     doc.addPage();
-    y = drawHeader('External CO Attainment');
+    y = drawHeader('External CO Attainment', 'Theory');
     var extMax = students.length > 0 ? (students[0].externalMax || 70) : 70;
     head = [['SNo', 'Roll No.', 'Student Name', 'External Obtained (out of ' + extMax + ')', 'External Maximum', 'Attainment /3']];
     body = students.map(function(s, i) {
@@ -3344,10 +3439,10 @@ async function generateFoilPDF(foil) {
     doc.text('Course average: ' + extAvg.toFixed(2), margin, doc.lastAutoTable.finalY + 14);
   }
 
-  // PAGE 10: Total Marks (Internal & External)
+  // v12.80: PAGE 10 — Total Marks (MOVED HERE — Theory section)
   if (students.length > 0) {
     doc.addPage();
-    y = drawHeader('Total Marks in Internal & External Exam');
+    y = drawHeader('Total Marks in Internal & External Exam', 'Theory');
     head = [['SNo', 'Roll No.', 'Name', 'Internal (out of 30)', 'External (out of 70)', 'Total (out of 100)', 'Result', 'Grade', 'Grade Point']];
     body = students.map(function(s, i) {
       return [String(i+1), String(s.roll||''), String(s.name||''),
@@ -3364,13 +3459,228 @@ async function generateFoilPDF(foil) {
       doc.text('Average Marks: ' + (foil.totalSummary.avgMarks||0).toFixed(2) + '    Highest: ' + (foil.totalSummary.highestMarks||0) + '    Lowest: ' + (foil.totalSummary.lowestMarks||0), margin, y);
     }
   }
+  // ── END PART 1: THEORY SECTION ──────────────────────────────────────────
 
-  // PAGE 11: Internal CO Attainment
-  if (foil.coAttainment && foil.coAttainment.length > 0) {
+  // ── PART 2: PRACTICAL SECTION ───────────────────────────────────────────
+  // Only render if ANY student has PRA/PDA/Viva marks (non-zero)
+  var hasPracticalMarks = students.some(function(s) { return (s.pra||0) + (s.pda||0) + (s.viva||0) > 0; });
+  // v12.84: Per-component presence flags from the foil data. If a component has
+  // max=0 (missing), its individual page AND its column in the Master sheet are
+  // skipped. Default to true for backward compat with older foil data.
+  var fHasPRA = foil.hasPRA !== undefined ? foil.hasPRA : true;
+  var fHasPDA = foil.hasPDA !== undefined ? foil.hasPDA : true;
+  var fHasViva = foil.hasViva !== undefined ? foil.hasViva : true;
+  var fHasTwAssign = foil.hasTwAssign !== undefined ? foil.hasTwAssign : true;
+  var fHasSeminar = foil.hasSeminar !== undefined ? foil.hasSeminar : true;
+  var fHasMicroProj = foil.hasMicroProj !== undefined ? foil.hasMicroProj : true;
+
+  // PAGE: Process Assessment (PRA) — v12.80: per-CO attainment columns
+  if (hasPracticalMarks && fHasPRA) {
     doc.addPage();
-    y = drawHeader('Internal CO Attainment');
+    y = drawHeader('Process Assessment (PRA)', 'Practical');
+    var praMax = students[0] ? (students[0].praMax || 10) : 10;
+    // Build CO column headers
+    var coHeaders = ['SNo', 'Roll No.', 'Student Name', 'Marks (out of ' + praMax + ')'];
+    for (var pc = 1; pc <= coCount; pc++) coHeaders.push('CO' + pc + ' Level');
+    head = [coHeaders];
+    body = students.map(function(s, i) {
+      var row = [String(i+1), String(s.roll||''), String(s.name||''), String(s.pra||0)];
+      for (var pc2 = 1; pc2 <= coCount; pc2++) {
+        var coKey = 'CO' + pc2;
+        var attVal = s.praCoAttainment ? (s.praCoAttainment[coKey] || 0) : 0;
+        row.push(attVal.toFixed(2));
+      }
+      return row;
+    });
+    doc.autoTable({ head: head, body: body, startY: y, margin: {left: margin, right: margin},
+      styles: {font:'helvetica', fontSize:6, cellPadding:2}, headStyles: {fillColor:[26,58,92], textColor:255, fontSize:6} });
+    // Average per CO
+    y = doc.lastAutoTable.finalY + 14;
+    doc.setFontSize(7); doc.setFont('helvetica','bold');
+    var avgLine = 'Average: ';
+    for (var ac = 1; ac <= coCount; ac++) {
+      var acKey = 'CO' + ac;
+      var sum = 0, cnt = 0;
+      students.forEach(function(s) {
+        if (s.praCoAttainment && s.praCoAttainment[acKey]) { sum += s.praCoAttainment[acKey]; cnt++; }
+      });
+      avgLine += acKey + '=' + (cnt > 0 ? (sum/cnt).toFixed(2) : '0') + '  ';
+    }
+    doc.text(avgLine, margin, y);
+  }
+
+  // PAGE: Product Assessment (PDA) — v12.80: per-CO attainment columns
+  if (hasPracticalMarks && fHasPDA) {
+    doc.addPage();
+    y = drawHeader('Product Assessment (PDA)', 'Practical');
+    var pdaMax = students[0] ? (students[0].pdaMax || 10) : 10;
+    var coHeaders2 = ['SNo', 'Roll No.', 'Student Name', 'Marks (out of ' + pdaMax + ')'];
+    for (var pc3 = 1; pc3 <= coCount; pc3++) coHeaders2.push('CO' + pc3 + ' Level');
+    head = [coHeaders2];
+    body = students.map(function(s, i) {
+      var row = [String(i+1), String(s.roll||''), String(s.name||''), String(s.pda||0)];
+      for (var pc4 = 1; pc4 <= coCount; pc4++) {
+        var coKey2 = 'CO' + pc4;
+        var attVal2 = s.pdaCoAttainment ? (s.pdaCoAttainment[coKey2] || 0) : 0;
+        row.push(attVal2.toFixed(2));
+      }
+      return row;
+    });
+    doc.autoTable({ head: head, body: body, startY: y, margin: {left: margin, right: margin},
+      styles: {font:'helvetica', fontSize:6, cellPadding:2}, headStyles: {fillColor:[26,58,92], textColor:255, fontSize:6} });
+    y = doc.lastAutoTable.finalY + 14;
+    doc.setFontSize(7); doc.setFont('helvetica','bold');
+    var avgLine2 = 'Average: ';
+    for (var ac2 = 1; ac2 <= coCount; ac2++) {
+      var acKey2 = 'CO' + ac2;
+      var sum2 = 0, cnt2 = 0;
+      students.forEach(function(s) {
+        if (s.pdaCoAttainment && s.pdaCoAttainment[acKey2]) { sum2 += s.pdaCoAttainment[acKey2]; cnt2++; }
+      });
+      avgLine2 += acKey2 + '=' + (cnt2 > 0 ? (sum2/cnt2).toFixed(2) : '0') + '  ';
+    }
+    doc.text(avgLine2, margin, y);
+  }
+
+  // PAGE: Viva-Voce Assessment — v12.80: per-CO attainment columns
+  if (hasPracticalMarks && fHasViva) {
+    doc.addPage();
+    y = drawHeader('Viva-Voce Assessment', 'Practical');
+    var vivaMax = students[0] ? (students[0].vivaMax || 10) : 10;
+    var coHeaders3 = ['SNo', 'Roll No.', 'Student Name', 'Marks (out of ' + vivaMax + ')'];
+    for (var pc5 = 1; pc5 <= coCount; pc5++) coHeaders3.push('CO' + pc5 + ' Level');
+    head = [coHeaders3];
+    body = students.map(function(s, i) {
+      var row = [String(i+1), String(s.roll||''), String(s.name||''), String(s.viva||0)];
+      for (var pc6 = 1; pc6 <= coCount; pc6++) {
+        var coKey3 = 'CO' + pc6;
+        var attVal3 = s.vivaCoAttainment ? (s.vivaCoAttainment[coKey3] || 0) : 0;
+        row.push(attVal3.toFixed(2));
+      }
+      return row;
+    });
+    doc.autoTable({ head: head, body: body, startY: y, margin: {left: margin, right: margin},
+      styles: {font:'helvetica', fontSize:6, cellPadding:2}, headStyles: {fillColor:[26,58,92], textColor:255, fontSize:6} });
+    y = doc.lastAutoTable.finalY + 14;
+    doc.setFontSize(7); doc.setFont('helvetica','bold');
+    var avgLine3 = 'Average: ';
+    for (var ac3 = 1; ac3 <= coCount; ac3++) {
+      var acKey3 = 'CO' + ac3;
+      var sum3 = 0, cnt3 = 0;
+      students.forEach(function(s) {
+        if (s.vivaCoAttainment && s.vivaCoAttainment[acKey3]) { sum3 += s.vivaCoAttainment[acKey3]; cnt3++; }
+      });
+      avgLine3 += acKey3 + '=' + (cnt3 > 0 ? (sum3/cnt3).toFixed(2) : '0') + '  ';
+    }
+    doc.text(avgLine3, margin, y);
+  }
+
+  // PAGE: Practical Master Marks Sheet — v12.82: weights are ratio-based
+  // (maxPRA/labInternalMax, etc.) shown from foil.coAttainmentPractical[0]
+  // v12.84: columns are dynamic — zero-weight components are omitted entirely.
+  if (hasPracticalMarks) {
+    doc.addPage();
+    y = drawHeader('Practical Master Marks Sheet', 'Practical');
+    // v12.82: derive weight labels from the computed CO attainment weights
+    var pracWt = (foil.coAttainmentPractical && foil.coAttainmentPractical[0]) || {};
+    // v12.84: build header + body rows dynamically, skipping absent components
+    var pracHeadArr = ['SNo', 'Roll No.', 'Name'];
+    if (fHasPRA) pracHeadArr.push('PRA (' + (pracWt.praWeight != null ? pracWt.praWeight : '') + '%)');
+    if (fHasPDA) pracHeadArr.push('PDA (' + (pracWt.pdaWeight != null ? pracWt.pdaWeight : '') + '%)');
+    if (fHasViva) pracHeadArr.push('Viva (' + (pracWt.vivaWeight != null ? pracWt.vivaWeight : '') + '%)');
+    pracHeadArr.push('Internal (out of ' + (students[0]?students[0].practicalInternalMax||20:20) + ')');
+    pracHeadArr.push('External', 'Grand Total');
+    head = [pracHeadArr];
+    body = students.map(function(s, i) {
+      var pracInt = (s.pra||0) + (s.pda||0) + (s.viva||0);
+      var pracExt = s.practicalExt||0;
+      var pracGrand = pracInt + pracExt;
+      var row = [String(i+1), String(s.roll||''), String(s.name||'')];
+      if (fHasPRA) row.push(String(s.pra||0));
+      if (fHasPDA) row.push(String(s.pda||0));
+      if (fHasViva) row.push(String(s.viva||0));
+      row.push(String(pracInt), String(pracExt), String(pracGrand));
+      return row;
+    });
+    doc.autoTable({ head: head, body: body, startY: y, margin: {left: margin, right: margin},
+      styles: {font:'helvetica', fontSize:7, cellPadding:2}, headStyles: {fillColor:[26,58,92], textColor:255, fontSize:7} });
+  }
+  // ── END PART 2: PRACTICAL SECTION ───────────────────────────────────────
+
+  // ── PART 3: TERM WORK SECTION ───────────────────────────────────────────
+  // Only render if ANY student has Assignment-TW/Seminar/MicroProject marks (non-zero)
+  var hasTermWorkMarks = students.some(function(s) { return (s.twAssignment||0) + (s.seminar||0) + (s.microProject||0) > 0; });
+
+  // PAGE: Term Work — Assignment
+  if (hasTermWorkMarks && fHasTwAssign) {
+    doc.addPage();
+    y = drawHeader('Term Work — Assignment', 'Term Work');
+    var twAMax = students[0] ? (students[0].twAssignmentMax || 10) : 10;
+    head = [['SNo', 'Roll No.', 'Student Name', 'Marks Obtained (out of ' + twAMax + ')', 'Attainment Level']];
+    body = students.map(function(s, i) {
+      return [String(i+1), String(s.roll||''), String(s.name||''), String(s.twAssignment||0), String(s.twAssignmentLevel||0)];
+    });
+    doc.autoTable({ head: head, body: body, startY: y, margin: {left: margin, right: margin},
+      styles: {font:'helvetica', fontSize:7, cellPadding:2}, headStyles: {fillColor:[26,58,92], textColor:255, fontSize:7} });
+  }
+
+  // PAGE: Term Work — Seminar
+  if (hasTermWorkMarks && fHasSeminar) {
+    doc.addPage();
+    y = drawHeader('Term Work — Seminar', 'Term Work');
+    var semMax = students[0] ? (students[0].seminarMax || 10) : 10;
+    head = [['SNo', 'Roll No.', 'Student Name', 'Marks Obtained (out of ' + semMax + ')', 'Attainment Level']];
+    body = students.map(function(s, i) {
+      return [String(i+1), String(s.roll||''), String(s.name||''), String(s.seminar||0), String(s.seminarLevel||0)];
+    });
+    doc.autoTable({ head: head, body: body, startY: y, margin: {left: margin, right: margin},
+      styles: {font:'helvetica', fontSize:7, cellPadding:2}, headStyles: {fillColor:[26,58,92], textColor:255, fontSize:7} });
+  }
+
+  // PAGE: Term Work — Micro Project
+  if (hasTermWorkMarks && fHasMicroProj) {
+    doc.addPage();
+    y = drawHeader('Term Work — Micro Project', 'Term Work');
+    var mpMax = students[0] ? (students[0].microProjectMax || 15) : 15;
+    head = [['SNo', 'Roll No.', 'Student Name', 'Marks Obtained (out of ' + mpMax + ')', 'Attainment Level']];
+    body = students.map(function(s, i) {
+      return [String(i+1), String(s.roll||''), String(s.name||''), String(s.microProject||0), String(s.microProjectLevel||0)];
+    });
+    doc.autoTable({ head: head, body: body, startY: y, margin: {left: margin, right: margin},
+      styles: {font:'helvetica', fontSize:7, cellPadding:2}, headStyles: {fillColor:[26,58,92], textColor:255, fontSize:7} });
+  }
+
+  // PAGE: Term Work Master Marks Sheet — v12.84: columns dynamic, zero-weight omitted
+  if (hasTermWorkMarks) {
+    doc.addPage();
+    y = drawHeader('Term Work Master Marks Sheet', 'Term Work');
+    var twHeadArr = ['SNo', 'Roll No.', 'Name'];
+    if (fHasTwAssign) twHeadArr.push('Assignment');
+    if (fHasSeminar) twHeadArr.push('Seminar');
+    if (fHasMicroProj) twHeadArr.push('Micro Project');
+    twHeadArr.push('Internal Total', 'External', 'Grand Total');
+    head = [twHeadArr];
+    body = students.map(function(s, i) {
+      var row = [String(i+1), String(s.roll||''), String(s.name||'')];
+      if (fHasTwAssign) row.push(String(s.twAssignment||0));
+      if (fHasSeminar) row.push(String(s.seminar||0));
+      if (fHasMicroProj) row.push(String(s.microProject||0));
+      row.push(String(s.termWorkInternalTotal||0), String(s.twExt||0), String(s.termWorkTotal||0));
+      return row;
+    });
+    doc.autoTable({ head: head, body: body, startY: y, margin: {left: margin, right: margin},
+      styles: {font:'helvetica', fontSize:7, cellPadding:2}, headStyles: {fillColor:[26,58,92], textColor:255, fontSize:7} });
+  }
+  // ── END PART 3: TERM WORK SECTION ───────────────────────────────────────
+
+  // ── SUMMARY SECTION (course-level, no section prefix) ───────────────────
+  // v12.80: CO ATTAINMENT — separate tables per section
+  // PAGE: Internal CO Attainment — Theory
+  if (foil.coAttainmentTheory && foil.coAttainmentTheory.length > 0) {
+    doc.addPage();
+    y = drawHeader('CO Attainment from Theory');
     head = [['CO', 'CT Attainment', 'Assignment Attainment', 'Attendance Attainment', 'CT Weight', 'Asg Weight', 'Att Weight', 'Final Internal CO Attainment']];
-    body = foil.coAttainment.map(function(co) {
+    body = foil.coAttainmentTheory.map(function(co) {
       return [co.co||'', (co.ctAvg||0).toFixed(2), (co.assignAvg||0).toFixed(2), (co.attAvg||0).toFixed(2),
         co.ctWeight + '%', co.assignWeight + '%', co.attWeight + '%', (co.finalInternal||0).toFixed(2)];
     });
@@ -3378,12 +3688,69 @@ async function generateFoilPDF(foil) {
       styles: {font:'helvetica', fontSize:7, cellPadding:2}, headStyles: {fillColor:[26,58,92], textColor:255, fontSize:7} });
   }
 
-  // PAGE 12: Final CO Attainment
-  if (foil.finalCOAttainment && foil.finalCOAttainment.length > 0) {
+  // PAGE: Internal CO Attainment — Practical — v12.84: dynamic columns
+  if (foil.coAttainmentPractical && foil.coAttainmentPractical.length > 0) {
     doc.addPage();
-    y = drawHeader('Final CO Attainment');
+    y = drawHeader('CO Attainment from Practical');
+    var pracCoHead = ['CO'];
+    if (fHasPRA) pracCoHead.push('PRA Attainment');
+    if (fHasPDA) pracCoHead.push('PDA Attainment');
+    if (fHasViva) pracCoHead.push('Viva-Voce Attainment');
+    if (fHasPRA) pracCoHead.push('PRA Weight');
+    if (fHasPDA) pracCoHead.push('PDA Weight');
+    if (fHasViva) pracCoHead.push('Viva Weight');
+    pracCoHead.push('Final Internal CO Attainment');
+    head = [pracCoHead];
+    body = foil.coAttainmentPractical.map(function(co) {
+      var row = [co.co||''];
+      if (fHasPRA) row.push((co.praAvg||0).toFixed(2));
+      if (fHasPDA) row.push((co.pdaAvg||0).toFixed(2));
+      if (fHasViva) row.push((co.vivaAvg||0).toFixed(2));
+      if (fHasPRA) row.push(co.praWeight + '%');
+      if (fHasPDA) row.push(co.pdaWeight + '%');
+      if (fHasViva) row.push(co.vivaWeight + '%');
+      row.push((co.finalInternal||0).toFixed(2));
+      return row;
+    });
+    doc.autoTable({ head: head, body: body, startY: y, margin: {left: margin, right: margin},
+      styles: {font:'helvetica', fontSize:7, cellPadding:2}, headStyles: {fillColor:[26,58,92], textColor:255, fontSize:7} });
+  }
+
+  // PAGE: Internal CO Attainment — Term Work — v12.84: dynamic columns
+  if (foil.coAttainmentTermWork && foil.coAttainmentTermWork.length > 0) {
+    doc.addPage();
+    y = drawHeader('CO Attainment from Term Work');
+    var twCoHead = ['CO'];
+    if (fHasTwAssign) twCoHead.push('Assignment Attainment');
+    if (fHasSeminar) twCoHead.push('Seminar Attainment');
+    if (fHasMicroProj) twCoHead.push('Micro Project Attainment');
+    if (fHasTwAssign) twCoHead.push('Asg Weight');
+    if (fHasSeminar) twCoHead.push('Seminar Weight');
+    if (fHasMicroProj) twCoHead.push('MicroProj Weight');
+    twCoHead.push('Final Internal CO Attainment');
+    head = [twCoHead];
+    body = foil.coAttainmentTermWork.map(function(co) {
+      var row = [co.co||''];
+      if (fHasTwAssign) row.push((co.assignAvg||0).toFixed(2));
+      if (fHasSeminar) row.push((co.seminarAvg||0).toFixed(2));
+      if (fHasMicroProj) row.push((co.microProjAvg||0).toFixed(2));
+      if (fHasTwAssign) row.push(co.assignWeight + '%');
+      if (fHasSeminar) row.push(co.seminarWeight + '%');
+      if (fHasMicroProj) row.push(co.microProjWeight + '%');
+      row.push((co.finalInternal||0).toFixed(2));
+      return row;
+    });
+    doc.autoTable({ head: head, body: body, startY: y, margin: {left: margin, right: margin},
+      styles: {font:'helvetica', fontSize:7, cellPadding:2}, headStyles: {fillColor:[26,58,92], textColor:255, fontSize:7} });
+  }
+
+  // v12.80: FINAL CO ATTAINMENT — separate tables per section
+  // PAGE: Final CO Attainment — Theory
+  if (foil.finalCOAttainmentTheory && foil.finalCOAttainmentTheory.length > 0) {
+    doc.addPage();
+    y = drawHeader('Final CO Attainment — Theory');
     head = [['CO', 'Internal', 'External', 'Direct*', 'Indirect**', 'Final', 'Final %', 'Target %', 'Margin', 'Status']];
-    body = foil.finalCOAttainment.map(function(co) {
+    body = foil.finalCOAttainmentTheory.map(function(co) {
       return [co.co||'', (co.internalAttainment||0).toFixed(2), (co.externalAttainment||0).toFixed(2),
         (co.directAttainment||0).toFixed(2), (co.indirectAttainment||0).toFixed(2),
         (co.finalAttainment||0).toFixed(2), (co.finalPct||0).toFixed(2) + '%',
@@ -3397,20 +3764,147 @@ async function generateFoilPDF(foil) {
     doc.text('** Final Attainment = 80% of Direct + 20% of Indirect', margin, y + 10);
   }
 
-  // PAGE 13: PO-PSO Attainment (if cosArray available)
-  if (cosArray.length > 0) {
+  // PAGE: Final CO Attainment — Practical
+  if (foil.finalCOAttainmentPractical && foil.finalCOAttainmentPractical.length > 0) {
     doc.addPage();
-    y = drawHeader('Direct PO-PSO Attainment');
-    head = [['CO', 'Course Outcome Statement', 'PO1', 'PO2', 'PO3', 'PO4', 'PO5', 'PO6', 'PO7', 'PSO1', 'PSO2']];
-    body = cosArray.map(function(co) {
-      var po = co.poMapping || {};
-      return [co.key||('CO'+co.num), (co.statement||'').substring(0,80),
-        String(po.PO1||0), String(po.PO2||0), String(po.PO3||0), String(po.PO4||0),
-        String(po.PO5||0), String(po.PO6||0), String(po.PO7||0), String(po.PSO1||0), String(po.PSO2||0)];
+    y = drawHeader('Final CO Attainment — Practical');
+    head = [['CO', 'Internal', 'External', 'Direct*', 'Indirect**', 'Final', 'Final %', 'Target %', 'Margin', 'Status']];
+    body = foil.finalCOAttainmentPractical.map(function(co) {
+      return [co.co||'', (co.internalAttainment||0).toFixed(2), (co.externalAttainment||0).toFixed(2),
+        (co.directAttainment||0).toFixed(2), (co.indirectAttainment||0).toFixed(2),
+        (co.finalAttainment||0).toFixed(2), (co.finalPct||0).toFixed(2) + '%',
+        (co.targetPct||0) + '%', (co.margin||0).toFixed(2), co.status||''];
     });
     doc.autoTable({ head: head, body: body, startY: y, margin: {left: margin, right: margin},
       styles: {font:'helvetica', fontSize:6, cellPadding:2}, headStyles: {fillColor:[26,58,92], textColor:255, fontSize:6} });
+    y = doc.lastAutoTable.finalY + 10;
+    doc.setFontSize(7); doc.setFont('helvetica','italic');
+    doc.text('* Direct attainment = 30% of Internal + 70% of External', margin, y);
+    doc.text('** Final Attainment = 80% of Direct + 20% of Indirect', margin, y + 10);
   }
+
+  // PAGE: Final CO Attainment — Term Work
+  if (foil.finalCOAttainmentTermWork && foil.finalCOAttainmentTermWork.length > 0) {
+    doc.addPage();
+    y = drawHeader('Final CO Attainment — Term Work');
+    head = [['CO', 'Internal', 'External', 'Direct*', 'Indirect**', 'Final', 'Final %', 'Target %', 'Margin', 'Status']];
+    body = foil.finalCOAttainmentTermWork.map(function(co) {
+      return [co.co||'', (co.internalAttainment||0).toFixed(2), (co.externalAttainment||0).toFixed(2),
+        (co.directAttainment||0).toFixed(2), (co.indirectAttainment||0).toFixed(2),
+        (co.finalAttainment||0).toFixed(2), (co.finalPct||0).toFixed(2) + '%',
+        (co.targetPct||0) + '%', (co.margin||0).toFixed(2), co.status||''];
+    });
+    doc.autoTable({ head: head, body: body, startY: y, margin: {left: margin, right: margin},
+      styles: {font:'helvetica', fontSize:6, cellPadding:2}, headStyles: {fillColor:[26,58,92], textColor:255, fontSize:6} });
+    y = doc.lastAutoTable.finalY + 10;
+    doc.setFontSize(7); doc.setFont('helvetica','italic');
+    doc.text('* Direct attainment = 30% of Internal + 70% of External', margin, y);
+    doc.text('** Final Attainment = 80% of Direct + 20% of Indirect', margin, y + 10);
+  }
+
+  // PAGE: PO-PSO Attainment (if cosArray available)
+  // v12.80: Complete rewrite — landscape mode, show all POs defined for the
+  // course (poCount), match reference foil format with formula text.
+  if (cosArray.length > 0) {
+    // v12.80: Add a LANDSCAPE page for PO-PSO (wide table needs it)
+    doc.addPage('a4', 'landscape');
+    var landPageW = doc.internal.pageSize.getWidth();
+    var landPageH = doc.internal.pageSize.getHeight();
+    var landMargin = 25;
+
+    // Draw header manually for landscape (drawHeader uses portrait dimensions)
+    var ly = landMargin;
+    var lLogoSize = 40;
+    var lLogoX = landPageW / 2 - lLogoSize / 2 - 180;
+    try { doc.addImage('data:image/jpeg;base64,' + GPM_LOGO_B64, 'JPEG', lLogoX, ly, lLogoSize, lLogoSize); } catch(e) {}
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold');
+    doc.text('Government Polytechnic Munger', landPageW / 2 + 30, ly + 16, { align: 'center' });
+    doc.setFontSize(11);
+    doc.text('Department of ' + deptName, landPageW / 2 + 30, ly + 32, { align: 'center' });
+    ly += 48;
+    doc.setFontSize(9);
+    doc.text('Direct PO-PSO Attainment', landPageW / 2, ly, { align: 'center' });
+    ly += 12;
+    doc.setFont('helvetica', 'normal');
+    doc.text('Semester: ' + semester, landMargin, ly);
+    doc.text('Batch: ' + batch, landPageW - landMargin, ly, { align: 'right' });
+    ly += 11;
+    doc.text('Subject Name: ' + courseName, landMargin, ly);
+    doc.text('Subject Code: ' + courseCode, landPageW - landMargin, ly, { align: 'right' });
+    ly += 14;
+
+    // v12.80: Build coFinalMap from combinedFinalCO (average of all sections)
+    var coFinalMap = {};
+    if (foil.combinedFinalCO) {
+      Object.keys(foil.combinedFinalCO).forEach(function(coKey) {
+        coFinalMap[coKey] = foil.combinedFinalCO[coKey];
+      });
+    }
+
+    // v12.80: Get poCount and psoCount from foil data
+    var poCount = foil.poCount || 7;
+    var psoCount = foil.psoCount || 2;
+    // Build PO/PSO column headers
+    var poKeys = [];
+    for (var pi = 1; pi <= poCount && pi <= 15; pi++) poKeys.push('PO' + pi);
+    for (var psi = 1; psi <= psoCount && psi <= 5; psi++) poKeys.push('PSO' + psi);
+
+    // Compute PO/PSO attainment
+    var poSums = {}, poCounts = {};
+    cosArray.forEach(function(co) {
+      var po = co.poMapping || {};
+      var coAtt = coFinalMap[co.key] || 0;
+      poKeys.forEach(function(pk) {
+        var w = Number(po[pk] || 0);
+        if (w > 0) {
+          poSums[pk] = (poSums[pk] || 0) + coAtt * w;
+          poCounts[pk] = (poCounts[pk] || 0) + w;
+        }
+      });
+    });
+
+    // Table: CO → PO/PSO articulation matrix (all POs)
+    var poHead = [['CO', 'Course Outcome Statement']];
+    poKeys.forEach(function(pk) { poHead[0].push(pk); });
+    var poBody = cosArray.map(function(co) {
+      var po = co.poMapping || {};
+      var row = [co.key||('CO'+co.num), (co.statement||'').substring(0,70)];
+      poKeys.forEach(function(pk) { row.push(String(po[pk]||0)); });
+      return row;
+    });
+    // Add attainment rows
+    var attRow = ['Attainment (on Scale of 0-3)', ''];
+    var pctRow = ['Attainment %', ''];
+    poKeys.forEach(function(pk) {
+      if (poCounts[pk] > 0) {
+        var attVal = poSums[pk] / poCounts[pk];
+        attRow.push(attVal.toFixed(2));
+        pctRow.push(((attVal/3)*100).toFixed(2) + '%');
+      } else {
+        attRow.push('0');
+        pctRow.push('0.00%');
+      }
+    });
+    poBody.push(attRow);
+    poBody.push(pctRow);
+
+    doc.autoTable({ head: poHead, body: poBody, startY: ly, margin: {left: landMargin, right: landMargin},
+      styles: {font:'helvetica', fontSize:6, cellPadding:2}, headStyles: {fillColor:[26,58,92], textColor:255, fontSize:6},
+      columnStyles: { 0: {cellWidth: 25}, 1: {cellWidth: 140} } });
+
+    // Add formula text
+    ly = doc.lastAutoTable.finalY + 16;
+    doc.setFontSize(7); doc.setFont('helvetica','italic');
+    doc.text('Formula used for calculation of Direct PO-PSO Attainment:', landMargin, ly);
+    ly += 10;
+    doc.setFont('helvetica','normal');
+    doc.text('Direct PO-PSO Attainment = Σ(CO Attainment × CO-PO/PSO correlation weight) / Σ(CO-PO/PSO correlation weights)', landMargin, ly);
+    ly += 10;
+    doc.text('Where CO Attainment = Final CO Attainment (80% Direct + 20% Indirect)', landMargin, ly);
+    ly += 10;
+    doc.text('Attainment % = (Attainment / 3) × 100', landMargin, ly);
+  }
+  // ── END SUMMARY SECTION ─────────────────────────────────────────────────
 
   // Remove the first blank page (jsPDF creates one by default)
   if (doc.getNumberOfPages() > 1) {
@@ -3474,9 +3968,12 @@ async function generateMarksFoil() {
   const t1 = performance.now();
   console.log('generateMarksFoil: per-course foil built in ' + Math.round(t1 - t0) + 'ms');
 
+  // v12.80: Filename format: "<CourseName>_marks_foil_<Branch>_<Batch>.pdf"
+  // e.g. "Applied_Physics-B_marks_foil_EE_2024-27.pdf"
   const safeName = (foil.course.courseName || courseCode).replace(/[^A-Za-z0-9-]/g, '_');
   const safeBatch = batch.replace(/[^0-9-]/g, '');
-  const perCourseFileName = safeName + '_' + safeBatch + '.pdf';
+  const safeBranch = (branch || 'NA').replace(/[^A-Za-z0-9]/g, '');
+  const perCourseFileName = safeName + '_marks_foil_' + safeBranch + '_' + safeBatch + '.pdf';
 
   // STEP 3: Save per-course foil to Drive (in parallel with consolidated
   // build if requested — both are async and don't depend on each other).
@@ -3505,9 +4002,10 @@ async function generateMarksFoil() {
         base64: base64,
         fileName: perCourseFileName,
         mimeType: 'application/pdf',
-        facultyId: currentUser.facultyId,
+        facultyId: currentUser.facultyId || currentUser.hodId || '',
         courseSubfolder: courseSubfolder,
-        parentFolder: 'GPM Academic Documents'
+        parentFolder: 'GPM Academic Documents',
+        shareWith: currentUser.email || ''
       });
       if (upRes.success) {
         driveUrl  = upRes.url || '';
@@ -3655,6 +4153,22 @@ async function generateMarksFoil() {
   // v12.14: Refresh the "Previously Generated Foils" panel so the new
   // file appears in the list immediately.
   loadFacultyGeneratedFoils();
+}
+
+// v12.80: toggleFacultyMarksEntryForm() — show/hide the marks entry form
+// in the Marks tab. The foils list is always visible; the form is collapsed
+// by default so the tab focuses on generated foils.
+function toggleFacultyMarksEntryForm() {
+  var form = document.getElementById('faculty-marks-entry-form');
+  var btn = document.getElementById('fac-marks-toggle-form-btn');
+  if (!form) return;
+  if (form.classList.contains('hidden')) {
+    form.classList.remove('hidden');
+    if (btn) btn.textContent = '📋 Hide Entry Form';
+  } else {
+    form.classList.add('hidden');
+    if (btn) btn.textContent = '📝 Enter New Marks';
+  }
 }
 
 // v12.14: loadFacultyGeneratedFoils() — fetch the list of .pdf files
@@ -4243,16 +4757,15 @@ const _tabLoaders = {
   'student-tab-timetable': () => loadStudentTimetable(),
   'student-tab-attendance':() => loadStudentAttendance(),
   'student-tab-marks':     () => loadStudentMarks(),
-  'student-tab-feedback':  () => loadStudentFeedbackTab(),
-  'student-tab-cofeedback': () => loadStudentCoFeedbackTab(),
+  'student-tab-feedback':  () => { loadStudentCoFeedbackTab(); loadStudentFeedbackTab(); },
   'student-tab-notices':   () => loadStudentNotices(),
   'faculty-tab-profile':   () => loadFacultyProfile(),
   'faculty-tab-courses':   () => loadFacultyCourses(),
   'faculty-tab-attendance':() => { populateFacultyCourseDropdowns(); },
-  'faculty-tab-marks':     () => loadFacultyGeneratedFoils(),
+  'faculty-tab-marks':     () => { populateFacultyCourseDropdowns(); loadFacultyGeneratedFoils(); },
   'faculty-tab-timetable': () => bootstrapFacultyTimetableFilters(),
-  'faculty-tab-notes':     () => loadFacultyNotes(),
-  'faculty-tab-outcomes': () => loadCourseOutcomes(),
+  'faculty-tab-notes':     () => { populateFacultyCourseDropdowns(); loadFacultyNotes(); },
+  'faculty-tab-outcomes': () => { populateFacultyCoCourseDropdown(); loadCourseOutcomes(); },
   'faculty-tab-archive': () => loadFacultyArchiveInit(),
   'faculty-tab-feedback':  () => loadFacultyFeedbackSummary(),
   'hod-tab-students':   () => loadHodStudents(),
@@ -4423,6 +4936,8 @@ document.getElementById('btn-student-login').addEventListener('click', async () 
   }
 });
 
+// v12.80: SPEED OPTIMIZED — only load Profile immediately.
+// All other tabs load on-demand when clicked (handled by the tab system).
 function showStudentDashboard() {
   document.getElementById('student-auth').classList.add('hidden');
   document.getElementById('student-dashboard').classList.remove('hidden');
@@ -4431,19 +4946,13 @@ function showStudentDashboard() {
     const parent = container.closest('.card');
     if (parent) initTabs(parent);
   });
+  // v12.80: Only load Profile — other tabs load on-demand via tab click
   loadStudentProfile();
-  loadStudentCourses();
-  loadStudentTimetable();
-  loadStudentAttendance();
-  loadStudentMarks();
-  loadStudentNotices();
-  loadStudentFeedbackTab();
-  loadStudentGrievances();
   if (currentUser._profileUpdateRequired) {
     setTimeout(function() {
       alert('A new semester has been started!\n\nYou must update your profile — at minimum your current semester — before proceeding.\n\nClick OK to open the Edit Profile form.');
       showEditStudentProfile();
-    }, 1000);
+    }, 500);
   }
 }
 
@@ -4483,6 +4992,8 @@ document.getElementById('btn-faculty-login').addEventListener('click', async () 
   }
 });
 
+// v12.80: SPEED OPTIMIZED — only load Profile immediately.
+// Other tabs load on-demand via tab click.
 function showFacultyDashboard() {
   document.getElementById('faculty-auth').classList.add('hidden');
   document.getElementById('faculty-dashboard').classList.remove('hidden');
@@ -4491,17 +5002,8 @@ function showFacultyDashboard() {
     const parent = container.closest('.card');
     if (parent) initTabs(parent);
   });
+  // v12.80: Only load Profile — other tabs load on-demand
   loadFacultyProfile();
-  loadFacultyCourses();
-  populateFacultyCourseDropdowns();
-  populateFacultyCoCourseDropdown();
-  loadFacultyNotes();
-  bootstrapFeedbackSystem();
-  // v12.51: REMOVED loadFacultyFeedbackSummary() from here — it was causing a
-  // race condition with the tab loader (which also calls loadFacultyFeedbackSummary
-  // when the user clicks the Feedback tab). Both calls are async and both append
-  // options to the same dropdown, causing duplicate entries.
-  bootstrapFacultyTimetableFilters();
 }
 
 function loadFacultyProfile() {
@@ -4710,6 +5212,7 @@ document.getElementById('btn-hod-login').addEventListener('click', async () => {
   }
 });
 
+// v12.80: SPEED OPTIMIZED — only init tabs. Other tabs load on-demand.
 function showHodDashboard() {
   document.getElementById('hod-auth').classList.add('hidden');
   document.getElementById('hod-dashboard').classList.remove('hidden');
@@ -4718,15 +5221,8 @@ function showHodDashboard() {
     const parent = container.closest('.card');
     if (parent) initTabs(parent);
   });
+  // v12.80: Load first tab (Students) — other tabs load on-demand
   loadHodStudents();
-  loadHodFaculty();
-  loadHodAttendance();
-  loadHodReports();
-  bootstrapFeedbackSystem();
-  // v12.51: REMOVED loadHodFeedbackSummary() from here — same race condition fix
-  // as faculty side. The tab loader for 'hod-tab-feedback' handles populating
-  // the dropdown when the user clicks the Feedback tab.
-  bootstrapHodTimetableFilters();
 }
 
 // Admin Login
@@ -4745,6 +5241,7 @@ document.getElementById('btn-admin-login').addEventListener('click', async () =>
   }
 });
 
+// v12.80: SPEED OPTIMIZED — only init tabs + load first tab.
 function showAdminDashboard() {
   document.getElementById('admin-auth').classList.add('hidden');
   document.getElementById('admin-dashboard').classList.remove('hidden');
@@ -4752,15 +5249,7 @@ function showAdminDashboard() {
     const parent = container.closest('.card');
     if (parent) initTabs(parent);
   });
-  bootstrapAdminFaculty();
-  loadAdminCourses();
-  loadAdminTimetable();
-  loadAdminNotices();
-  bootstrapFeedbackSystem();
-  loadAdminFeedbackSummary();
-  loadPendingStudents();
-  loadSemesterUpdateRequests();
-  loadProfileUpdateRequests();
+  // v12.80: Only load first tab (Semester) — other tabs load on-demand
 }
 
 // Logout Buttons
@@ -5780,11 +6269,25 @@ async function loadStudentFeedbackTab() {
   _studentFeedbackSubmittedSet = status.success ? (status.submitted || {}) : {};
 
   // 4. Render the list — v12.54: per-course window check
+  // v12.80: Use eligibility[cc].tlSubmitted as PRIMARY source of truth.
+  // getStudentFeedbackStatus was REWRITTEN in GS to correctly read the
+  // feedbackMatrix JSON — so tlSubmitted is now accurate.
+  // ONE-TIME submission: no Edit button, just "✓ Submitted" badge.
   if (wrap) {
     wrap.innerHTML = courses.map(c => {
-      const submitted = _studentFeedbackSubmittedSet[c.courseCode] === true;
       const cc = String(c.courseCode || '').toUpperCase();
       const e = eligibility[cc] || { feedbackOpen: false, coSubmitted: false, tlSubmitted: false };
+      const submitted = e.tlSubmitted === true ||
+        _studentFeedbackSubmittedSet[c.courseCode] === true ||
+        _studentFeedbackSubmittedSet[cc] === true;
+      var actionHtml;
+      if (submitted) {
+        actionHtml = '<span class="badge-submitted">✓ Submitted</span>';
+      } else if (e.feedbackOpen) {
+        actionHtml = `<button class="btn btn-primary btn-sm" onclick="openFeedbackForm('${escapeAttr(c.courseCode)}','${escapeAttr(c.facultyId || '')}','${escapeAttr(c.semester || '')}','${escapeAttr(c.branch || '')}','${escapeAttr(c.courseName || '')}')">Give Feedback</button>`;
+      } else {
+        actionHtml = '<span class="badge badge-pending">Awaiting CT4 Marks</span>';
+      }
       return `
         <div class="fb-course-card" data-course="${escapeAttr(c.courseCode)}">
           <div class="fb-c-info">
@@ -5794,13 +6297,7 @@ async function loadStudentFeedbackTab() {
               Faculty: ${escapeHtml(c.facultyId || '—')} · Sem ${escapeHtml(c.semester || '—')} · Branch ${escapeHtml(c.branch || '—')}
             </div>
           </div>
-          <div>
-            ${submitted
-              ? '<span class="badge-submitted">✓ Submitted</span>'
-              : (e.feedbackOpen
-                  ? `<button class="btn btn-primary btn-sm" onclick="openFeedbackForm('${escapeAttr(c.courseCode)}','${escapeAttr(c.facultyId || '')}','${escapeAttr(c.semester || '')}','${escapeAttr(c.branch || '')}','${escapeAttr(c.courseName || '')}')">Give Feedback</button>`
-                  : '<span class="badge badge-pending">Awaiting CT4 Marks</span>')}
-          </div>
+          <div>${actionHtml}</div>
         </div>
       `;
     }).join('');
@@ -5966,11 +6463,26 @@ async function loadStudentCoFeedbackTab() {
   _studentCoFeedbackSubmittedSet = status.success ? (status.submitted || {}) : {};
 
   // 4. Render list — v12.54: per-course window check
+  // v12.80: Use eligibility[cc].coSubmitted as PRIMARY source of truth.
+  // ONE-TIME submission: no Edit button, just "✓ Submitted" badge.
   if (wrap) {
     wrap.innerHTML = courses.map(function(c) {
-      var submitted = _studentCoFeedbackSubmittedSet[c.courseCode] === true;
       var cc = String(c.courseCode || '').toUpperCase();
-      var e = eligibility[cc] || { feedbackOpen: false };
+      var e = eligibility[cc] || { feedbackOpen: false, coSubmitted: false, tlSubmitted: false };
+      var submitted = e.coSubmitted === true ||
+        _studentCoFeedbackSubmittedSet[c.courseCode] === true ||
+        _studentCoFeedbackSubmittedSet[cc] === true;
+      var actionHtml;
+      if (submitted) {
+        actionHtml = '<span class="badge-submitted">✓ Submitted</span>';
+      } else if (e.feedbackOpen) {
+        actionHtml = '<button class="btn btn-primary btn-sm" onclick="openCoFeedbackForm(' +
+          '\'' + escapeAttr(c.courseCode) + '\',\'' + escapeAttr(c.courseName || '') + '\',' +
+          '\'' + escapeAttr(c.semester || '') + '\',\'' + escapeAttr(c.branch || '') + '\',' +
+          '\'' + escapeAttr(c.facultyId || '') + '\')">Rate COs</button>';
+      } else {
+        actionHtml = '<span class="badge badge-pending">Awaiting CT4 Marks</span>';
+      }
       return '<div class="fb-course-card" data-course="' + escapeAttr(c.courseCode) + '">' +
         '<div class="fb-c-info">' +
           '<div class="fb-c-code">' + escapeHtml(c.courseCode) + '</div>' +
@@ -5979,16 +6491,7 @@ async function loadStudentCoFeedbackTab() {
             ' · Sem ' + escapeHtml(c.semester || '—') +
             ' · Branch ' + escapeHtml(c.branch || '—') + '</div>' +
         '</div>' +
-        '<div>' +
-          (submitted
-            ? '<span class="badge-submitted">✓ Submitted</span>'
-            : (e.feedbackOpen
-                ? '<button class="btn btn-primary btn-sm" onclick="openCoFeedbackForm(\'' +
-                    escapeAttr(c.courseCode) + '\',\'' + escapeAttr(c.courseName || '') + '\',\'' +
-                    escapeAttr(c.semester || '') + '\',\'' + escapeAttr(c.branch || '') + '\',\'' +
-                    escapeAttr(c.facultyId || '') + '\')">Rate COs</button>'
-                : '<span class="badge badge-pending">Awaiting CT4 Marks</span>')) +
-        '</div>' +
+        '<div>' + actionHtml + '</div>' +
       '</div>';
     }).join('');
   }
@@ -9336,7 +9839,7 @@ async function linkAttendanceToMarks() {
   const branch = courseSel?.selectedOptions[0]?.dataset.branch || '';
   const sessionType = document.getElementById('fac-att-session-type')?.value || 'theory';
   if (!courseCode) { showToast('Select a course first'); return; }
-  if (!confirm('This will WRITE attendance marks (max 5) to the Marks sheet for this course using the percentage → marks scale:\n\n≥95% → 5\n≥85% → 4\n≥75% → 3\n≥65% → 2\n≥60% → 1\nelse → 0\n\nComponent name will be "' + (sessionType === 'practical' ? 'Attendance (Prac)' : 'Attendance') + ' (5)". Continue?')) return;
+  if (!confirm('This will AUTO-CALCULATE attendance marks (max 5) from attendance percentage and write them to the Marks sheet:\n\n≥95% → 5\n≥85% → 4\n≥75% → 3\n≥65% → 2\n≥60% → 1\nelse → 0\n\nStudents whose attendance marks were MANUALLY EDITED in the Marks Entry tab will be SKIPPED (delinked) — their manually entered marks remain final.\n\nContinue?')) return;
 
   showToast('Linking attendance to marks…');
   const r = await apiCall('linkAttendanceToMarks', {
@@ -9344,9 +9847,20 @@ async function linkAttendanceToMarks() {
     enteredBy: currentUser.facultyId
   });
   if (!r.success) { showToast('Link failed: ' + (r.error || 'unknown')); return; }
-  showToast(r.message || 'Attendance linked to marks');
+  var msg = r.message || 'Attendance linked to marks';
+  if (r.studentsSkipped && r.studentsSkipped > 0) {
+    msg += '\n\nNote: ' + r.studentsSkipped + ' student(s) were SKIPPED because their attendance marks were manually edited in the Marks Entry tab. To re-link them, delete their attendance marks in the Marks Entry tab first, then click Link to Marks again.';
+  }
+  showToast(msg);
   var linkStatus = document.getElementById('faculty-attendance-link-status');
-  if (linkStatus) linkStatus.innerHTML = '<div class="alert alert-success" style="font-size:12px">✓ ' + escapeHtml(r.message || 'Linked') + '</div>';
+  if (linkStatus) {
+    var html = '<div class="alert alert-success" style="font-size:12px">✓ ' + escapeHtml(r.message || 'Linked');
+    if (r.studentsSkipped && r.studentsSkipped > 0) {
+      html += '<br><em style="color:var(--warning)">' + r.studentsSkipped + ' student(s) skipped (manually edited — delinked from auto-attendance)</em>';
+    }
+    html += '</div>';
+    linkStatus.innerHTML = html;
+  }
   // Reload to reflect the linked state
   await loadFacultyAttendanceSummary();
 }
@@ -9373,124 +9887,67 @@ async function linkAttendanceToMarks() {
 // CO picker is shown only for Internal modes (multi-select).
 // ──────────────────────────────────────────────────────────────────────────
 
-// Cascade step 1: Section change → reset Part + Component + Number + COs
+// v12.80: MARKS ENTRY RESTRUCTURE — all components shown as columns.
+// Defines the component set for each (Section, Part) combination.
+// End Sem names are now section-specific to avoid matrix collisions:
+//   Theory: "End Sem" (70), Practical: "End Sem (Prac)" (30), TW: "End Sem (TW)" (30)
+// Assignment names: Theory: "Assignment" (5), TW: "Assignment (TW)" (10)
+function getSectionComponents(section, part) {
+  if (section === 'Theory' && part === 'Internal') {
+    return [
+      { name: 'CT1', max: 20 },
+      { name: 'CT2', max: 20 },
+      { name: 'CT3', max: 20 },
+      { name: 'CT4', max: 20 },
+      { name: 'Assignment', max: 5 },
+      { name: 'Attendance', max: 5 }
+    ];
+  } else if (section === 'Theory' && part === 'External') {
+    return [{ name: 'End Sem', max: 70 }];
+  } else if (section === 'Practical' && part === 'Internal') {
+    return [
+      { name: 'PRA', max: 10 },
+      { name: 'PDA', max: 10 },
+      { name: 'Viva-Voce', max: 10 }
+    ];
+  } else if (section === 'Practical' && part === 'External') {
+    return [{ name: 'End Sem (Prac)', max: 30 }];
+  } else if (section === 'Term Work' && part === 'Internal') {
+    return [
+      { name: 'Assignment (TW)', max: 10 },
+      { name: 'Seminar', max: 10 },
+      { name: 'Micro Project', max: 15 }
+    ];
+  } else if (section === 'Term Work' && part === 'External') {
+    return [{ name: 'End Sem (TW)', max: 30 }];
+  }
+  return [];
+}
+
+// Cascade step 1: Section change → reset Part
 function onMarksSectionChange() {
   const partSel = document.getElementById('fac-marks-part');
   if (partSel) partSel.value = '';
-  const compSel = document.getElementById('fac-marks-component-type');
-  if (compSel) {
-    compSel.innerHTML = '<option value="">— Select Part first —</option>';
-  }
-  const numField = document.getElementById('fac-marks-component-number-field');
-  if (numField) numField.style.display = 'none';
-  const coField = document.getElementById('fac-marks-co-field');
-  if (coField) coField.style.display = 'none';
-  resetMaxMarks();
+  const sheet = document.getElementById('faculty-marks-sheet');
+  if (sheet) sheet.innerHTML = '';
+  const actions = document.getElementById('faculty-marks-actions');
+  if (actions) actions.classList.add('hidden');
+  // v12.80: CO picker removed — no-op
 }
 
-// Cascade step 2: Part change → populate Component dropdown based on (Section, Part)
+// Cascade step 2: Part change
 function onMarksPartChange() {
-  const section = document.getElementById('fac-marks-section')?.value || '';
-  const part    = document.getElementById('fac-marks-part')?.value || '';
-  const compSel = document.getElementById('fac-marks-component-type');
-  const numField = document.getElementById('fac-marks-component-number-field');
-  const coField  = document.getElementById('fac-marks-co-field');
-  if (!compSel) return;
-
-  // Reset dependent UI
-  compSel.innerHTML = '';
-  if (numField) numField.style.display = 'none';
-  if (coField) coField.style.display = 'none';
-  resetMaxMarks();
-
-  if (!section || !part) {
-    compSel.innerHTML = '<option value="">— Select Section &amp; Part first —</option>';
-    return;
-  }
-
-  // Build component options based on (Section, Part)
-  let opts = [];
-  if (section === 'Theory' && part === 'Internal') {
-    opts = [
-      { v: 'CT1',         label: 'Class Test 1 (CT1)',     max: 20 },
-      { v: 'CT2',         label: 'Class Test 2 (CT2)',     max: 20 },
-      { v: 'CT3',         label: 'Class Test 3 (CT3)',     max: 20 },
-      { v: 'CT4',         label: 'Class Test 4 (CT4)',     max: 20 },
-      { v: 'Assignment',  label: 'Assignment',             max: 5  },
-      { v: 'Quiz',        label: 'Quiz',                   max: 10 }
-    ];
-  } else if (section === 'Theory' && part === 'External') {
-    opts = [ { v: 'End Sem', label: 'End Semester Exam', max: 70 } ];
-  } else if (section === 'Practical' && part === 'Internal') {
-    // Prac.N uses a separate Number dropdown — single option here
-    opts = [ { v: 'Prac', label: 'Practical (select no. below)', max: 25 } ];
-  } else if (section === 'Practical' && part === 'External') {
-    opts = [ { v: 'End Sem', label: 'End Sem (Practical Exam)', max: 30 } ];
-  } else if (section === 'Term Work' && part === 'Internal') {
-    opts = [ { v: 'TW', label: 'Term Work (select no. below)', max: 25 } ];
-  } else if (section === 'Term Work' && part === 'External') {
-    opts = [ { v: 'End Sem', label: 'End Sem (Term Work Exam)', max: 30 } ];
-  }
-
-  let html = '<option value="">— Select Component —</option>';
-  opts.forEach(o => { html += '<option value="'+o.v+'">'+o.label+'</option>'; });
-  compSel.innerHTML = html;
-
-  // Show Number dropdown for Practical/Internal + Term Work/Internal
-  if (numField && ((section === 'Practical' && part === 'Internal') ||
-                    (section === 'Term Work' && part === 'Internal'))) {
-    const numSel = document.getElementById('fac-marks-component-number');
-    if (numSel) {
-      let nhtml = '<option value="">— Select No. —</option>';
-      for (let n = 1; n <= 30; n++) {
-        nhtml += '<option value="'+n+'">'+n+'</option>';
-      }
-      numSel.innerHTML = nhtml;
-    }
-    numField.style.display = '';
-  } else if (numField) {
-    numField.style.display = 'none';
-  }
-
-  // Show CO picker for Internal modes
-  if (coField && part === 'Internal') {
-    coField.style.display = '';
-    loadMarksCoPicker();
-  } else if (coField) {
-    coField.style.display = 'none';
-  }
+  const sheet = document.getElementById('faculty-marks-sheet');
+  if (sheet) sheet.innerHTML = '';
+  const actions = document.getElementById('faculty-marks-actions');
+  if (actions) actions.classList.add('hidden');
 }
 
-// Cascade step 3: Component change — adjust Max Marks default
-function onMarksComponentChange() {
-  const section = document.getElementById('fac-marks-section')?.value || '';
-  const part    = document.getElementById('fac-marks-part')?.value || '';
-  const v       = document.getElementById('fac-marks-component-type')?.value || '';
-  const maxInput = document.getElementById('fac-marks-max');
-  if (!v) return;
-  // Default max marks lookup table
-  const defaults = {
-    'CT1': 20, 'CT2': 20, 'CT3': 20, 'CT4': 20,
-    'Assignment': 5, 'Quiz': 10,
-    'Prac': 25, 'TW': 25,
-    'End Sem': (section === 'Theory') ? 70 : (section === 'Practical' ? 30 : 30)
-  };
-  if (maxInput && defaults[v] !== undefined) {
-    maxInput.value = defaults[v];
-  }
-}
+function onMarksComponentChange() { /* no-op — v12.80 removed component dropdown */ }
+function onMarksComponentNumberChange() { /* no-op */ }
+function resetMaxMarks() { /* no-op */ }
 
-// Cascade step 4: Practical/TW Number change — no-op for now (max stays from component)
-function onMarksComponentNumberChange() {
-  // No additional logic needed; number is captured at save time
-}
-
-function resetMaxMarks() {
-  const maxInput = document.getElementById('fac-marks-max');
-  if (maxInput) maxInput.value = 20;
-}
-
-// Load CO multi-select picker — uses getCourseOutcomes API
+// v12.80: Load CO multi-select picker — re-added
 async function loadMarksCoPicker() {
   const courseSel = document.getElementById('fac-marks-course');
   const courseCode = courseSel?.value || '';
@@ -9503,7 +9960,7 @@ async function loadMarksCoPicker() {
   wrap.innerHTML = '<div style="color:var(--gray-400);font-size:12px">Loading COs…</div>';
   const r = await apiCall('getCourseOutcomes', { courseCode });
   if (!r.success || !r.courseOutcomes) {
-    wrap.innerHTML = '<div style="color:var(--gray-500);font-size:12px;font-style:italic">COs not yet defined for this course. You can still enter marks; CO mapping will be blank.</div>';
+    wrap.innerHTML = '<div style="color:var(--gray-500);font-size:12px;font-style:italic">COs not yet defined. You can still enter marks.</div>';
     return;
   }
   const cosArray = r.courseOutcomes.cosArray || [];
@@ -9514,48 +9971,21 @@ async function loadMarksCoPicker() {
   let html = '';
   cosArray.forEach(c => {
     const coKey = 'CO' + c.num;
-    const stmt = (c.statement || '').length > 60
-      ? (c.statement || '').substring(0, 60) + '…'
-      : (c.statement || '');
-    html += '<label style="display:block;font-size:12px;padding:2px 0">' +
-      '<input type="checkbox" class="fac-marks-co-cb" value="'+escapeAttr(coKey)+'" style="margin-right:6px">' +
-      '<strong>'+escapeHtml(coKey)+'</strong> — '+escapeHtml(stmt) +
-      '</label>';
+    const stmt = (c.statement || '').length > 50 ? (c.statement || '').substring(0, 50) + '…' : (c.statement || '');
+    html += '<label style="display:block;font-size:11px;padding:2px 0">' +
+      '<input type="checkbox" class="fac-marks-co-cb" value="'+escapeAttr(coKey)+'" style="margin-right:4px">' +
+      '<strong>'+escapeHtml(coKey)+'</strong> — '+escapeHtml(stmt) + '</label>';
   });
   wrap.innerHTML = html;
 }
 
-// Build the encoded component identifier used in marks storage.
-// Format: '<Section>_<Component>' for unique identification in the Marks sheet.
-// e.g. 'Theory_CT1', 'Theory_End Sem', 'Practical_Prac', 'TermWork_TW'
-function getMarksComponentKey() {
-  const section = document.getElementById('fac-marks-section')?.value || '';
-  const part    = document.getElementById('fac-marks-part')?.value || '';
-  const compType = document.getElementById('fac-marks-component-type')?.value || '';
-  const num     = document.getElementById('fac-marks-component-number')?.value || '';
-  return {
-    section: section,
-    part: part,
-    componentType: compType,
-    componentNumber: num,            // '1'-'30' for Prac/TW, '' otherwise
-    componentName: buildComponentName(section, part, compType, num)
-  };
-}
-
-// Human-readable component name (stored in Marks.componentName column)
-function buildComponentName(section, part, compType, num) {
-  if (compType === 'End Sem') return 'End Sem';
-  if (compType === 'Prac')  return 'Prac.' + (num || '?');
-  if (compType === 'TW')    return 'TW.' + (num || '?');
-  return compType;  // CT1, CT2, Assignment, Quiz
-}
-
-// Helper: returns the selected CO list as a comma-separated string
 function getSelectedCos() {
   const cbs = document.querySelectorAll('#fac-marks-co-checkboxes .fac-marks-co-cb:checked');
   return Array.from(cbs).map(cb => cb.value).join(',');
 }
 
+// v12.80: loadFacultyMarksEntry — renders ALL components as columns with
+// editable Max Marks in the header, Total Internal column, "-" for empty.
 async function loadFacultyMarksEntry() {
   const wrap = document.getElementById('faculty-marks-sheet');
   if (!wrap) return;
@@ -9563,144 +9993,314 @@ async function loadFacultyMarksEntry() {
   const courseCode = courseSel?.value || '';
   const semester = courseSel?.selectedOptions[0]?.dataset.semester || '';
   const branch = courseSel?.selectedOptions[0]?.dataset.branch || '';
-  const meta = getMarksComponentKey();
-  const maxMarks = document.getElementById('fac-marks-max').value;
+  const section = document.getElementById('fac-marks-section')?.value || '';
+  const part = document.getElementById('fac-marks-part')?.value || '';
 
   if (!courseCode) { showToast('Select a course'); return; }
-  if (!meta.section || !meta.part) { showToast('Select Section and Part'); return; }
-  if (!meta.componentType) { showToast('Select a Component'); return; }
-  if ((meta.componentType === 'Prac' || meta.componentType === 'TW') && !meta.componentNumber) {
-    showToast('Select the Practical/TW number'); return;
-  }
-  if (meta.part === 'Internal') {
-    const cos = getSelectedCos();
-    if (!cos) { showToast('Select at least one CO covered by this component'); return; }
-  }
+  if (!section || !part) { showToast('Select Section and Part'); return; }
+
+  const components = getSectionComponents(section, part);
+  if (components.length === 0) { showToast('No components for this Section+Part'); return; }
+
   wrap.innerHTML = '<div style="color:var(--gray-400);padding:18px;text-align:center">Loading students…</div>';
+
   const r = await apiCall('getCourseStudents', { courseCode, semester, branch });
   if (!r.success) { wrap.innerHTML = '<div class="alert alert-danger">Failed: ' + (r.error||'unknown') + '</div>'; return; }
   const students = r.students || [];
   if (students.length === 0) {
     wrap.innerHTML = '<div class="alert alert-info">No students registered.</div>';
     document.getElementById('faculty-marks-actions').classList.add('hidden');
-    // v12.13: hide the previous foil result panel too — it's stale
-    document.getElementById('faculty-marks-foil-result')?.classList.add('hidden');
     return;
   }
 
-  // v12.15: Fetch any previously-saved marks for this component tuple.
-  // Returns { marksByRoll: { studentRoll → { obtainedMarks, remarks, enteredAt } } }.
-  // If empty, all inputs stay blank (fresh entry). If populated, the
-  // matching students' inputs are pre-filled with their existing marks +
-  // a "previously saved on <date>" badge is shown above the table.
-  let existingMarks = {};
-  let existingCount = 0;
-  let lastSavedAt = '';
-  try {
-    const em = await apiCall('getExistingMarks', {
+  // Fetch existing marks for ALL components in parallel
+  const existingMarksPromises = components.map(function(comp) {
+    return apiCall('getExistingMarks', {
       courseCode, semester, branch,
-      componentType: meta.componentType,
-      componentName: meta.componentName
+      componentType: comp.name, componentName: comp.name, maxMarks: comp.max
+    }).then(function(em) {
+      return { comp: comp, marksByRoll: (em.success && em.marksByRoll) ? em.marksByRoll : {} };
+    }).catch(function() { return { comp: comp, marksByRoll: {} }; });
+  });
+  const existingResults = await Promise.all(existingMarksPromises);
+  var existingByComp = {};
+  existingResults.forEach(function(er) { existingByComp[er.comp.name] = er.marksByRoll; });
+
+  // v12.80: For External sections, also fetch Internal component marks so we
+  // can display the Internal total in the "Total Internal" column.
+  var internalTotalByRoll = {};
+  if (part === 'External') {
+    var internalComps = getSectionComponents(section, 'Internal');
+    var internalPromises = internalComps.map(function(ic) {
+      return apiCall('getExistingMarks', {
+        courseCode, semester, branch,
+        componentType: ic.name, componentName: ic.name, maxMarks: ic.max
+      }).then(function(em) {
+        return { comp: ic, marksByRoll: (em.success && em.marksByRoll) ? em.marksByRoll : {} };
+      }).catch(function() { return { comp: ic, marksByRoll: {} }; });
     });
-    if (em.success && em.marksByRoll) {
-      existingMarks = em.marksByRoll;
-      existingCount = em.count || 0;
-      // Use the most recent enteredAt for the badge
-      Object.keys(existingMarks).forEach(function(roll) {
-        const e = existingMarks[roll];
-        if (e.enteredAt && e.enteredAt > lastSavedAt) lastSavedAt = e.enteredAt;
+    var internalResults = await Promise.all(internalPromises);
+    var internalByComp = {};
+    internalResults.forEach(function(ir) { internalByComp[ir.comp.name] = ir.marksByRoll; });
+    // Compute Internal total per student
+    students.forEach(function(s) {
+      var rk = String(s.studentRoll || '').trim().toUpperCase();
+      var vals = {};
+      internalComps.forEach(function(ic) {
+        var em = internalByComp[ic.name] || {};
+        var ex = em[rk];
+        if (ex && ex.obtainedMarks !== undefined && ex.obtainedMarks !== '') {
+          vals[ic.name] = parseFloat(ex.obtainedMarks) || 0;
+        }
       });
-    }
-  } catch (e) {
-    console.warn('getExistingMarks failed (non-fatal):', e);
+      if (section === 'Theory') {
+        var ctM = [vals['CT1']||0, vals['CT2']||0, vals['CT3']||0, vals['CT4']||0];
+        ctM.sort(function(a,b){return b-a;});
+        internalTotalByRoll[rk] = Math.round(((ctM[0]+ctM[1])/2 + (vals['Assignment']||0) + (vals['Attendance']||0)) * 100) / 100;
+      } else if (section === 'Practical') {
+        internalTotalByRoll[rk] = (vals['PRA']||0) + (vals['PDA']||0) + (vals['Viva-Voce']||0);
+      } else if (section === 'Term Work') {
+        internalTotalByRoll[rk] = (vals['Assignment (TW)']||0) + (vals['Seminar']||0) + (vals['Micro Project']||0);
+      }
+    });
   }
 
-  // Header reminder
-  let headerLine = '<div class="alert alert-info" style="margin-bottom:8px;font-size:12px">' +
-    '<strong>'+escapeHtml(meta.section)+' · '+escapeHtml(meta.part)+' · '+escapeHtml(meta.componentName)+'</strong>' +
-    (meta.part === 'Internal' ? ' — COs: '+escapeHtml(getSelectedCos() || '—') : '') +
-    ' — Max: '+escapeHtml(maxMarks)+'</div>';
-  // v12.15: Add a status badge when marks already exist for this component
-  if (existingCount > 0) {
-    const dateStr = lastSavedAt ? new Date(lastSavedAt).toLocaleString() : '';
-    headerLine += '<div class="alert alert-success" style="margin-bottom:8px;font-size:12px;padding:6px 10px">' +
-      '✓ <strong>' + existingCount + ' student(s) already have marks saved</strong> for this component' +
-      (dateStr ? ' (last updated: ' + escapeHtml(dateStr) + ')' : '') +
-      '. Edit the values below and click Save Marks to update them in place — no duplicate rows will be created.' +
-      '</div>';
-  } else {
-    headerLine += '<div class="alert alert-warning" style="margin-bottom:8px;font-size:12px;padding:6px 10px">' +
-      'No marks entered yet for this component. Enter marks below and click Save Marks.' +
-      '</div>';
-  }
+  // v12.80: CO picker removed — no COs in marks entry
+  var headerLine = '<div class="alert alert-info" style="margin-bottom:8px;font-size:12px">' +
+    '<strong>' + escapeHtml(section) + ' · ' + escapeHtml(part) + '</strong> — ' +
+    components.length + ' component(s)' +
+    '</div>';
+
+  // Build table header with editable Max Marks inputs
+  // v12.80: Uniform styling — all headers same style
+  var tableHead = '<tr><th>SNo</th><th>Roll</th><th>Name</th>';
+  components.forEach(function(comp, ci) {
+    tableHead += '<th style="text-align:center;white-space:nowrap">' + escapeHtml(comp.name) + '<br>' +
+      '<input type="number" min="1" value="' + comp.max + '" ' +
+      'id="fac-max-' + ci + '" data-comp-idx="' + ci + '" ' +
+      'class="fac-max-input" style="width:45px;padding:2px;font-size:11px;text-align:center;border:1px solid var(--gray-300);border-radius:3px" ' +
+      'oninput="onMaxMarksChange(' + ci + ')"></th>';
+  });
+  tableHead += '<th style="text-align:center;white-space:nowrap">Total<br>Internal</th>';
+  tableHead += '</tr>';
+
+  // Build table body
+  // v12.80: All input cells + total cell have uniform styling
+  var tableBody = '';
+  students.forEach(function(s, idx) {
+    var rollKey = String(s.studentRoll || '').trim().toUpperCase();
+    tableBody += '<tr><td>' + (idx+1) + '</td><td><strong>' + escapeHtml(s.studentRoll) + '</strong></td><td>' + escapeHtml(s.studentName||'—') + '</td>';
+    components.forEach(function(comp, ci) {
+      var em = existingByComp[comp.name] || {};
+      var existing = em[rollKey];
+      var marksVal = (existing && existing.obtainedMarks !== undefined && existing.obtainedMarks !== '' && Number(existing.obtainedMarks) !== 0) ? existing.obtainedMarks : '';
+      tableBody += '<td style="text-align:center"><input type="number" min="0" value="' + escapeAttr(String(marksVal)) + '" ' +
+        'placeholder="—" ' +
+        'data-roll="' + escapeAttr(s.studentRoll) + '" data-name="' + escapeAttr(s.studentName||'') + '" ' +
+        'data-comp="' + escapeAttr(comp.name) + '" data-comp-idx="' + ci + '" data-default-max="' + comp.max + '" ' +
+        'class="fac-marks-input fac-marks-col-' + ci + '" ' +
+        'style="width:50px;padding:4px;text-align:center;border:1px solid var(--gray-300);border-radius:3px;font-size:12px" ' +
+        'oninput="onMarksInputChange(this)"></td>';
+    });
+    // v12.80: Total Internal — for External, show pre-computed internal total; for Internal, computed live
+    var preTotal = (part === 'External' && internalTotalByRoll[rollKey] !== undefined) ? internalTotalByRoll[rollKey] : null;
+    tableBody += '<td style="text-align:center;font-weight:700;background:var(--gray-100);font-size:13px;padding:4px;border:1px solid var(--gray-200);border-radius:3px" class="fac-total-internal" id="total-' + idx + '">' + (preTotal !== null ? preTotal : '—') + '</td>';
+    tableBody += '</tr>';
+  });
+
   wrap.innerHTML = headerLine +
-    '<table class="data-table"><thead><tr><th>Roll</th><th>Name</th><th>Obtained (out of '+escapeHtml(maxMarks)+')</th><th>Remarks</th></tr></thead><tbody>' +
-    students.map(s => {
-      const rollKey = String(s.studentRoll || '').trim().toUpperCase();
-      const em = existingMarks[rollKey];
-      const marksVal = (em && em.obtainedMarks !== undefined && em.obtainedMarks !== '' && Number(em.obtainedMarks) !== 0) ? em.obtainedMarks : '';
-      const remarksVal = (em && em.remarks) ? em.remarks : '';
-      // v12.15: highlight rows that have previously-saved marks
-      const rowClass = em ? 'style="background:#f0f9f0"' : '';
-      return `
-      <tr ${rowClass}>
-        <td><strong>${escapeHtml(s.studentRoll)}</strong></td>
-        <td>${escapeHtml(s.studentName||'—')}</td>
-        <td><input type="number" min="0" max="${maxMarks}" value="${escapeAttr(String(marksVal))}" data-roll="${escapeAttr(s.studentRoll)}" data-name="${escapeAttr(s.studentName||'')}" class="fac-marks-input" style="width:80px;padding:6px"></td>
-        <td><input type="text" value="${escapeAttr(remarksVal)}" data-roll="${escapeAttr(s.studentRoll)}" class="fac-marks-remarks" placeholder="Optional" style="padding:6px"></td>
-      </tr>
-    `;
-    }).join('') + '</tbody></table>';
+    '<div style="overflow-x:auto"><table class="data-table" style="font-size:12px"><thead>' + tableHead + '</thead><tbody>' + tableBody + '</tbody></table></div>' +
+    '<div style="font-size:11px;color:var(--gray-600);margin-top:6px">Enter marks for each component. Edit Max Marks in the header if needed. Empty fields show "—". Click Save Marks to save all.</div>';
+
   document.getElementById('faculty-marks-actions').classList.remove('hidden');
-  // Store context for save
+
+  // Store context
   window._marksContext = {
     courseCode, semester, branch,
-    section: meta.section, part: meta.part,
-    componentType: meta.componentType,
-    componentNumber: meta.componentNumber,
-    componentName: meta.componentName,
-    maxMarks: maxMarks,
-    coNumbers: meta.part === 'Internal' ? getSelectedCos() : ''
+    section, part,
+    components: components,
+    coNumbers: ''
   };
+
+  // Calculate initial totals
+  recalcAllTotals();
 }
 
+// v12.80: When Max Marks input changes, update the max attribute on all
+// marks inputs in that column, and re-validate.
+function onMaxMarksChange(ci) {
+  var maxInput = document.getElementById('fac-max-' + ci);
+  if (!maxInput) return;
+  var newMax = parseInt(maxInput.value, 10) || 0;
+  var colInputs = document.querySelectorAll('.fac-marks-col-' + ci);
+  colInputs.forEach(function(inp) {
+    inp.max = newMax;
+    inp.dataset.max = newMax; // for save
+    // Validate
+    validateMark(inp);
+  });
+  recalcAllTotals();
+}
+
+// v12.80: When a marks input changes, validate and recalculate total
+function onMarksInputChange(inp) {
+  validateMark(inp);
+  recalcAllTotals();
+}
+
+// v12.80: Validate — marks must be <= max marks. Show error styling if not.
+function validateMark(inp) {
+  var max = parseInt(inp.max, 10) || parseInt(inp.dataset.defaultMax, 10) || 0;
+  var val = parseFloat(inp.value);
+  if (inp.value !== '' && val > max) {
+    inp.style.borderColor = 'var(--danger)';
+    inp.style.backgroundColor = '#fee2e2';
+    inp.title = 'Marks (' + val + ') exceed max (' + max + ')';
+  } else {
+    inp.style.borderColor = '';
+    inp.style.backgroundColor = '';
+    inp.title = '';
+  }
+}
+
+// v12.80: Recalculate Total Internal for all rows
+// Theory Internal: avg of top 2 CT marks + Assignment + Attendance
+// Practical Internal: PRA + PDA + Viva-Voce
+// Term Work Internal: Assignment (TW) + Seminar + Micro Project
+// Theory External: show Theory Internal total (avg top 2 CT + Assignment + Attendance)
+// Practical External: show Practical Internal total (PRA + PDA + Viva-Voce)
+// Term Work External: show Term Work Internal total (Assignment (TW) + Seminar + Micro Project)
+function recalcAllTotals() {
+  var ctx = window._marksContext;
+  var section = ctx ? ctx.section : '';
+  var part = ctx ? ctx.part : '';
+  // v12.80: For External mode, Total Internal is pre-computed from saved Internal marks — don't recalculate
+  if (part === 'External') return;
+  var rows = document.querySelectorAll('#faculty-marks-sheet tbody tr');
+  rows.forEach(function(row, idx) {
+    var inputs = row.querySelectorAll('.fac-marks-input');
+    var valsByComp = {};
+    var hasAny = false;
+    inputs.forEach(function(inp) {
+      var compName = inp.dataset.comp;
+      var val = parseFloat(inp.value);
+      if (inp.value !== '' && !isNaN(val)) {
+        valsByComp[compName] = val;
+        hasAny = true;
+      }
+    });
+
+    var total = 0;
+    // v12.80: For External sections, Total Internal = the Internal total of that section
+    // (computed from the marks already saved for that section's Internal components)
+    // For Internal sections, Total Internal = sum of the Internal components shown
+    if (section === 'Theory') {
+      // avg of top 2 CT marks + Assignment + Attendance
+      var ctMarks = [valsByComp['CT1']||0, valsByComp['CT2']||0, valsByComp['CT3']||0, valsByComp['CT4']||0];
+      ctMarks.sort(function(a,b){ return b-a; }); // descending
+      var ctAvg = (ctMarks[0] + ctMarks[1]) / 2;
+      total = ctAvg + (valsByComp['Assignment']||0) + (valsByComp['Attendance']||0);
+      total = Math.round(total * 100) / 100;
+    } else if (section === 'Practical') {
+      total = (valsByComp['PRA']||0) + (valsByComp['PDA']||0) + (valsByComp['Viva-Voce']||0);
+    } else if (section === 'Term Work') {
+      total = (valsByComp['Assignment (TW)']||0) + (valsByComp['Seminar']||0) + (valsByComp['Micro Project']||0);
+    } else {
+      total = 0;
+      Object.keys(valsByComp).forEach(function(k) { total += valsByComp[k]; });
+    }
+
+    var totalCell = document.getElementById('total-' + idx);
+    if (totalCell) {
+      totalCell.textContent = hasAny ? total : '—';
+    }
+  });
+}
+
+// v12.80: saveMarks — validates, then saves ALL components.
+// Uses the edited Max Marks from the header inputs.
 async function saveMarks() {
   const ctx = window._marksContext;
   if (!ctx) { showToast('No marks context — click Load Students first'); return; }
-  const marksInputs = document.querySelectorAll('#faculty-marks-sheet .fac-marks-input');
-  const remarksInputs = document.querySelectorAll('#faculty-marks-sheet .fac-marks-remarks');
-  const marksData = [];
-  marksInputs.forEach(inp => {
-    const remarks = Array.from(remarksInputs).find(r => r.dataset.roll === inp.dataset.roll)?.value || '';
-    marksData.push({
+  const inputs = document.querySelectorAll('#faculty-marks-sheet .fac-marks-input');
+  if (inputs.length === 0) { showToast('No marks to save'); return; }
+
+  // v12.80: Validate ALL inputs — marks must not exceed max
+  var validationErrors = [];
+  inputs.forEach(function(inp) {
+    if (inp.value === '') return; // skip empty
+    var val = parseFloat(inp.value);
+    var max = parseFloat(inp.max) || parseFloat(inp.dataset.defaultMax) || 0;
+    if (val > max) {
+      validationErrors.push(inp.dataset.roll + ' ' + inp.dataset.comp + ': ' + val + ' > ' + max);
+    }
+    if (val < 0) {
+      validationErrors.push(inp.dataset.roll + ' ' + inp.dataset.comp + ': negative');
+    }
+  });
+  if (validationErrors.length > 0) {
+    showToast('Validation errors — fix before saving:\n' + validationErrors.slice(0,5).join('\n') + (validationErrors.length > 5 ? '\n...(' + validationErrors.length + ' total)' : ''));
+    return;
+  }
+
+  // Get edited Max Marks from header inputs
+  var editedMaxByComp = {};
+  ctx.components.forEach(function(comp, ci) {
+    var maxInput = document.getElementById('fac-max-' + ci);
+    editedMaxByComp[comp.name] = maxInput ? (parseInt(maxInput.value, 10) || comp.max) : comp.max;
+  });
+
+  // Group marks by component
+  var marksByComp = {};
+  ctx.components.forEach(function(comp) { marksByComp[comp.name] = []; });
+  inputs.forEach(function(inp) {
+    var compName = inp.dataset.comp;
+    if (!marksByComp[compName]) return;
+    var val = inp.value;
+    if (val === '' || val === undefined) return; // skip empty
+    marksByComp[compName].push({
       studentRoll: inp.dataset.roll,
       studentName: inp.dataset.name,
-      obtainedMarks: inp.value || 0,
-      remarks: remarks
+      obtainedMarks: val,
+      remarks: ''
     });
   });
-  if (marksData.length === 0) { showToast('No students'); return; }
-  const r = await apiCall('enterMarks', {
-    courseCode: ctx.courseCode,
-    semester: ctx.semester,
-    branch: ctx.branch,
-    section: ctx.section,            // v12.10
-    part: ctx.part,                   // v12.10
-    componentType: ctx.componentType,
-    componentNumber: ctx.componentNumber,   // v12.10
-    componentName: ctx.componentName,
-    maxMarks: ctx.maxMarks,
-    coNumbers: ctx.coNumbers,          // v12.10 — comma-separated CO list for Internal modes
-    marksData: marksData,
-    enteredBy: currentUser.facultyId
-  });
-  if (!r.success) { showToast('Failed: ' + (r.error||'unknown')); return; }
-  // v12.15: Show explicit update-vs-insert counts from the backend's
-  // UPSERT logic so the faculty knows whether rows were updated or newly
-  // inserted (no more silent duplicates).
-  const upText = (r.updated  || 0) + ' updated';
-  const insText = (r.inserted || 0) + ' inserted';
-  showToast('Marks saved — ' + upText + ', ' + insText + ' (total ' + (r.total || marksData.length) + ')');
+
+  // Save each component
+  var totalSaved = 0;
+  var totalErrors = [];
+  for (var i = 0; i < ctx.components.length; i++) {
+    var comp = ctx.components[i];
+    var marksData = marksByComp[comp.name];
+    if (marksData.length === 0) continue;
+    var editedMax = editedMaxByComp[comp.name];
+
+    var r = await apiCall('enterMarks', {
+      courseCode: ctx.courseCode,
+      semester: ctx.semester,
+      branch: ctx.branch,
+      section: ctx.section,
+      part: ctx.part,
+      componentType: comp.name,
+      componentNumber: '',
+      componentName: comp.name,
+      maxMarks: editedMax,
+      coNumbers: ctx.coNumbers || '',
+      marksData: marksData,
+      enteredBy: currentUser.facultyId
+    });
+    if (r.success) {
+      totalSaved += (r.total || marksData.length);
+    } else {
+      totalErrors.push(comp.name + ': ' + (r.error || 'unknown'));
+    }
+  }
+
+  if (totalErrors.length > 0) {
+    showToast('Saved ' + totalSaved + ' marks, errors: ' + totalErrors.join('; '));
+  } else {
+    showToast('All marks saved — ' + totalSaved + ' entries across ' + ctx.components.length + ' components');
+  }
 }
 
 async function loadFacultyNotes() {
@@ -10100,8 +10700,7 @@ async function loadStudentMarks() {
   const list = r.marks || [];
   const lockedCourses = r.lockedCourses || [];
 
-  // v12.54: If any courses are locked (feedback not yet submitted), show a
-  // prominent warning at the top before the marks table.
+  // v12.54: locked courses warning
   var lockHtml = '';
   if (lockedCourses.length > 0) {
     lockHtml = '<div class="alert alert-warning" style="margin-bottom:14px">' +
@@ -10122,22 +10721,108 @@ async function loadStudentMarks() {
     return;
   }
 
+  // v12.59: Group marks by section (Theory / Practical / Term Work), then by course.
+  // Each section has one row per course, with internal components as columns +
+  // External + Total. A course only appears in a section if it has marks for
+  // at least one component in that section.
+  // v12.63: Average multiple experiment entries (PRA-1, PRA-2 → average PRA)
+  //   matching the marks foil behaviour.
+  var theoryCols = ['CT1', 'CT2', 'CT3', 'CT4', 'Assignment', 'Attendance'];
+  var pracCols   = ['PRA', 'PDA', 'Viva-Voce', 'Attendance'];
+  var twCols     = ['Assignment', 'Seminar', 'Micro Project'];
+
+  // v12.63: Strip "-N" suffix from componentName to get the base name.
+  // e.g. "PRA-1" → "PRA", "PDA-2" → "PDA", "CT1" → "CT1" (no change)
+  // v12.80: Also normalize "Attendance (Prac)" → "Attendance" so it shows
+  // in the Attendance column of the Practical section.
+  function baseComponentName(name) {
+    var n = String(name || '').replace(/-\d+$/, '');
+    // Normalize "Attendance (Prac)" → "Attendance" for column matching
+    if (n === 'Attendance (Prac)') n = 'Attendance';
+    // v12.80: Normalize section-specific End Sem names → "End Sem"
+    if (n === 'End Sem (Prac)' || n === 'End Sem (TW)') n = 'End Sem';
+    // v12.80: Normalize "Assignment (TW)" → "Assignment" for TW column matching
+    if (n === 'Assignment (TW)') n = 'Assignment';
+    return n;
+  }
+
+  // Group marks: section → courseCode → {baseComponentName → {sum, max, count}}
+  // Multiple experiment entries (PRA-1, PRA-2) accumulate into the same base key.
+  var grouped = { 'Theory': {}, 'Practical': {}, 'Term Work': {} };
+  list.forEach(function(m) {
+    var sec = m.section || 'Theory';
+    if (!grouped[sec]) sec = 'Theory';
+    var cc = String(m.courseCode || '').trim().toUpperCase();
+    if (!grouped[sec][cc]) {
+      grouped[sec][cc] = { courseCode: m.courseCode, courseName: m.courseName, components: {} };
+    }
+    var baseName = baseComponentName(m.componentName);
+    if (!grouped[sec][cc].components[baseName]) {
+      grouped[sec][cc].components[baseName] = { sum: 0, maxSum: 0, count: 0, max: 0 };
+    }
+    var c = grouped[sec][cc].components[baseName];
+    c.sum += Number(m.obtainedMarks || 0);
+    c.maxSum += Number(m.maxMarks || 0);
+    c.count++;
+    c.obtained = c.count > 0 ? Math.round((c.sum / c.count) * 100) / 100 : 0;  // average
+    c.max = c.count > 0 ? Math.round((c.maxSum / c.count) * 100) / 100 : 0;     // average max (per-entry max)
+  });
+
+  // Helper: render a single section table
+  function renderSection(title, sectionKey, internalCols) {
+    var courses = Object.values(grouped[sectionKey] || {});
+    if (courses.length === 0) return '';  // no marks in this section → don't show
+    var html = '<div style="margin-top:18px">' +
+      '<div class="section-heading" style="font-size:15px;margin-bottom:8px">' + escapeHtml(title) + '</div>' +
+      '<div style="overflow-x:auto"><table class="data-table" style="font-size:12px"><thead><tr>' +
+        '<th>Course</th>';
+    internalCols.forEach(function(c) { html += '<th style="text-align:center">' + escapeHtml(c) + '</th>'; });
+    html += '<th style="text-align:center">Internal Total</th>';
+    html += '<th style="text-align:center">External</th>';
+    html += '<th style="text-align:center">Total</th>';
+    html += '</tr></thead><tbody>';
+    courses.forEach(function(course) {
+      html += '<tr><td><strong>' + escapeHtml(course.courseCode) + '</strong><br><span style="font-size:10px;color:var(--gray-600)">' + escapeHtml(course.courseName||'') + '</span></td>';
+      var internalSum = 0, internalMax = 0;
+      internalCols.forEach(function(col) {
+        // For Theory "Attendance", also check "Attendance" (theory) not "Attendance (Prac)"
+        var comp = course.components[col];
+        if (!comp && col === 'Attendance') comp = course.components['Attendance'];
+        if (comp) {
+          internalSum += comp.obtained;
+          internalMax += comp.max;
+          html += '<td style="text-align:center"><strong>' + comp.obtained + '</strong>/' + comp.max + '</td>';
+        } else {
+          html += '<td style="text-align:center;color:var(--gray-400)">—</td>';
+        }
+      });
+      // Internal total
+      html += '<td style="text-align:center;font-weight:700">' + internalSum + (internalMax > 0 ? '/' + internalMax : '') + '</td>';
+      // External (End Sem)
+      var ext = course.components['End Sem'];
+      if (ext) {
+        html += '<td style="text-align:center;font-weight:700">' + ext.obtained + '/' + ext.max + '</td>';
+      } else {
+        html += '<td style="text-align:center;color:var(--gray-400)">—</td>';
+      }
+      // Total = internal + external
+      var totalObt = internalSum + (ext ? ext.obtained : 0);
+      var totalMax = internalMax + (ext ? ext.max : 0);
+      html += '<td style="text-align:center;font-weight:700;color:var(--navy)">' + totalObt + (totalMax > 0 ? '/' + totalMax : '') + '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table></div></div>';
+    return html;
+  }
+
   var marksHtml = '';
   if (list.length > 0) {
-    marksHtml = '<table class="data-table"><thead><tr>' +
-      '<th>Course</th><th>Component</th><th>Max</th><th>Obtained</th><th>%</th><th>Remarks</th>' +
-      '</tr></thead><tbody>' +
-      list.map(m => {
-        const pct = (m.maxMarks && Number(m.maxMarks) > 0) ? Math.round((Number(m.obtainedMarks) / Number(m.maxMarks)) * 100) : 0;
-        return `<tr>
-          <td><strong>${escapeHtml(m.courseCode)}</strong><br><span style="font-size:11px;color:var(--gray-600)">${escapeHtml(m.courseName||'')}</span></td>
-          <td>${escapeHtml(m.componentType||'')} — ${escapeHtml(m.componentName||'')}</td>
-          <td>${m.maxMarks||0}</td>
-          <td>${m.obtainedMarks||0}</td>
-          <td>${pct}%</td>
-          <td>${escapeHtml(m.remarks||'—')}</td>
-        </tr>`;
-      }).join('') + '</tbody></table>';
+    marksHtml = renderSection('Theory', 'Theory', theoryCols) +
+                renderSection('Practical', 'Practical', pracCols) +
+                renderSection('Term Work', 'Term Work', twCols);
+    if (!marksHtml) {
+      marksHtml = '<div class="alert alert-info" style="margin-top:14px">No visible marks yet.</div>';
+    }
   } else {
     marksHtml = '<div class="alert alert-info" style="margin-top:14px">All your marks are currently locked. Please submit the required feedback first.</div>';
   }
